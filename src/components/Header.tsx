@@ -5,9 +5,11 @@ import { useState } from "react";
 import { Logo } from "./Logo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
+import { useSession } from "@/lib/profile";
 
 export function Header() {
   const { t } = useI18n();
+  const { session, profile } = useSession();
   const [open, setOpen] = useState(false);
 
   const links = [
@@ -36,9 +38,21 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
-          <Link href="/sign-in" className="hidden text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-block px-2">
-            {t.nav.signIn}
-          </Link>
+          {session ? (
+            <Link
+              href="/profile"
+              className="hidden items-center gap-2 text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-flex px-1"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-ink)] text-xs font-bold text-[var(--color-marigold)]">
+                {(profile?.firstName?.[0] ?? "•").toUpperCase()}
+              </span>
+              {t.nav.profile}
+            </Link>
+          ) : (
+            <Link href="/sign-in" className="hidden text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-block px-2">
+              {t.nav.signIn}
+            </Link>
+          )}
           <Link href="/submit" className="btn btn-marigold !py-2.5 !px-4 text-sm">
             {t.nav.submit}
           </Link>
@@ -56,7 +70,7 @@ export function Header() {
 
       {open && (
         <nav className="border-t border-[var(--color-line)] px-5 py-3 md:hidden">
-          {[...links, { href: "/sign-in", label: t.nav.signIn }].map((l) => (
+          {[...links, session ? { href: "/profile", label: t.nav.profile } : { href: "/sign-in", label: t.nav.signIn }].map((l) => (
             <a
               key={l.href}
               href={l.href}

@@ -39,18 +39,29 @@ large tap targets, minimal client JS, `prefers-reduced-motion` respected.
 ```
 src/
   app/
-    layout.tsx            # fonts (Fraunces + Hanken Grotesk + Noto Devanagari) + i18n provider
+    layout.tsx            # fonts (Fraunces + Hanken Grotesk + Noto Devanagari) + i18n & session providers
     globals.css           # "People's Ledger" design system (design tokens, components, motion)
     page.tsx              # Landing page
     sign-in/page.tsx      # Dual-mode auth (citizen phone-OTP / MP Google)
-    submit/page.tsx       # Multi-modal submission: voice · text · photo
+    onboarding/page.tsx   # One-time profile capture (2nd layer after sign-in)
+    profile/page.tsx      # View & edit your details; sign out
+    submit/page.tsx       # Multi-modal submission (voice·text·photo) + anonymous / Aadhaar-verified choice
     api/submissions/route.ts  # Accepts a submission; documents the GCP pipeline
-  components/             # Logo, Header, Footer, LanguageSwitcher
+  components/             # Logo, Header (session-aware), Footer, LanguageSwitcher
   lib/
     i18n.tsx              # Typed dictionaries + language context (EN/HI live)
     firebase.ts           # Guarded client init (runs even without keys)
+    profile.tsx           # Session + profile store (localStorage now → Firestore later)
+    constants.ts          # Indian states / UTs
+docs/                     # PRD.md (spec) + ARCHITECTURE.md (analysis & ranking engine)
 Dockerfile                # Multi-stage → tiny Cloud Run image
 ```
+
+**Citizen flow:** sign in (phone OTP / Google) → **one-time onboarding** (name,
+address, constituency, PIN, state, optional Aadhaar) → **profile** (view/edit).
+On the submission page a citizen chooses **Submit anonymously** or **Verify with
+Aadhaar** at the top; verification surfaces the person's name + address (Aadhaar
+API is stubbed for the demo — real UIDAI/DigiLocker integration comes later).
 
 ---
 
