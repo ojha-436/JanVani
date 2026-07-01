@@ -23,8 +23,10 @@ Four constraints drove every decision: **lightweight to load**, **secure**,
 | Auth | **Firebase Auth** — Phone OTP + Google | Citizens sign in by phone number + SMS OTP (no password, no literacy barrier); MPs use Google. |
 | Database | **Firestore** | Serverless, scales to zero, generous free tier; geo-hotspots via geohash. |
 | Uploads | **Cloud Storage** (signed URLs) | Voice/photo go straight to a private bucket, never bloating the server. |
-| Speech→Text | **Cloud Speech-to-Text v2 (Chirp)** | Strong Indian-language coverage, pay-per-use. |
-| AI (classify / cluster / translate) | **Claude Haiku 4.5 on Vertex AI** | Latest Claude, GCP-native, cheapest capable tier. **Batched on new data + cached** for cost control. |
+| Analytics + ranking | **BigQuery** (+ BigQuery ML) | Joins citizen demand with Census/UDISE/NFHS/CPCB/IMD public data; runs the ranking engine. |
+| Maps | **Google Maps Platform** | Demand hotspot heatmap + travel-distance service gaps. |
+| Speech→Text · SMS/IVR | **Cloud Speech-to-Text (Chirp)** · **Dialogflow** | Multilingual voice intake + low-connectivity SMS/IVR flows. |
+| AI (vision / extract / cluster / rationale) | **Gemini (Flash-Lite) on Vertex AI** + **Translation API** | Organiser-recommended, credits available; **batched + cached** for cost control. |
 
 **Cost principle:** everything scales to zero; AI runs in **batches on new data
 only**, never per-request. **Security:** Firebase ID tokens + Firestore rules +
@@ -95,12 +97,14 @@ Application Default Credentials — **no key files in the container**.
 
 ## Roadmap (per the PRD)
 
+See [docs/PRD.md](docs/PRD.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full spec and the ranking-engine design.
+
 - [x] Landing, sign-in, multi-modal submission (this repo)
-- [ ] Speech-to-Text + Claude Haiku classification pipeline (batched)
-- [ ] Firestore theme/hotspot aggregation
-- [ ] MP dashboard: ranked priority list + demand heatmap + drill-down
-- [ ] Explainable ranking engine (demand × population × existing-gap)
-- [ ] Public-dataset seeding (Census / UDISE enrolment)
+- [ ] Speech-to-Text + Gemini extraction pipeline (batched via Pub/Sub)
+- [ ] BigQuery clustering, unique-citizen dedup, hotspot aggregation
+- [ ] Public-dataset seeding into BigQuery (Census / UDISE / NFHS / CPCB / IMD)
+- [ ] Explainable 6-factor ranking engine (demand · gap · population · equity · corroboration · feasibility)
+- [ ] MP dashboard: ranked list + Google Maps heatmap + drill-down + Gemini rationale
 
 ---
 
