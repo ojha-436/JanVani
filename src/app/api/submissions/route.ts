@@ -30,20 +30,24 @@ export async function POST(req: Request) {
     };
 
     // ---- PRODUCTION PIPELINE (Google Cloud) -------------------------
+    // Ingestion stays fast: persist + publish, then process async.
+    //
     // 1. Upload binaries to Cloud Storage (signed, private bucket):
     //      const bucket = new Storage().bucket(process.env.UPLOADS_BUCKET!);
     //      const audioFile = form.get("audio") as File | null; ...
     //
-    // 2. If audio present → Speech-to-Text v2 (Chirp) transcription in
-    //    the submitter's language; store transcript.
+    // 2. Publish to Pub/Sub ("raw-submissions") so a Cloud Run Job
+    //    processes it in micro-batches (cost control), doing:
+    //      - Speech-to-Text (Chirp) for audio → transcript
+    //      - Gemini multimodal for the photo → issue labels
+    //      - Translation API → English canonical `need_en`
+    //      - Gemini (JSON schema) → {category, urgency, entities}
+    //      - Vertex AI embeddings → clustering + dedup vector
+    //      - Maps Geocoding → ward/village/constituency
     //
-    // 3. Classify + normalise with Claude Haiku 4.5 on Vertex AI
-    //    (batched via a queue, not per-request, for cost control):
-    //      - detect category, translate to English canonical text,
-    //        extract the underlying "need", geo-tag to ward/village.
-    //
-    // 4. Write the record to Firestore (collection: "submissions") and
-    //    update the rolling theme/hotspot aggregates.
+    // 3. Write to Firestore (realtime dashboard) and stream the row to
+    //    BigQuery `fact_submission` for the ranking engine.
+    //    See docs/ARCHITECTURE.md for the analysis + ranking design.
     // -----------------------------------------------------------------
 
     const id = `sub_${Math.random().toString(36).slice(2, 10)}`;
