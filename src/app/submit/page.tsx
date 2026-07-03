@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { useI18n } from "@/lib/i18n";
+import { submitComplaint } from "@/services/api";
 
 type Mode = "voice" | "text" | "photo";
 
@@ -88,21 +89,16 @@ export default function SubmitPage() {
     setStatus("sending");
     setError(null);
     try {
-      // Multipart so voice/photo binaries ride along to the server,
-      // which (in production) streams them to Cloud Storage and writes
-      // the record to Firestore, then queues AI analysis.
-      const fd = new FormData();
-      fd.append("text", text);
-      fd.append("locale", locale);
-      fd.append("category", category !== null ? t.submit.categories[category] : "");
-      fd.append("location", location);
-      if (coords) fd.append("coords", JSON.stringify(coords));
-      fd.append("anonymous", String(anon));
-      if (audioBlob.current) fd.append("audio", audioBlob.current, "voice.webm");
-      if (photoFile.current) fd.append("photo", photoFile.current);
-
-      const res = await fetch("/api/submissions", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(`Server responded ${res.status}`);
+      // Audio/photo capture stays local-only for now — media upload lands
+      // in a later phase once Cloud Storage + async processing exist.
+      await submitComplaint({
+        text,
+        locale,
+        category: category !== null ? t.submit.categories[category] : undefined,
+        location,
+        coords,
+        anonymous: anon,
+      });
       setStatus("done");
     } catch (e) {
       setStatus("error");

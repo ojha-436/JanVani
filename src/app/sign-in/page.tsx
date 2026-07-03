@@ -6,6 +6,7 @@ import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { syncUser } from "@/services/api";
 
 type Role = "citizen" | "mp";
 type Step = "phone" | "otp";
@@ -24,6 +25,15 @@ export default function SignInPage() {
     const r = new URLSearchParams(window.location.search).get("role");
     if (r === "mp") setRole("mp");
   }, []);
+
+  async function trySyncUser() {
+    try {
+      const idToken = await auth!.currentUser!.getIdToken();
+      await syncUser(idToken);
+    } catch (e) {
+      console.error("Failed to sync user with backend", e);
+    }
+  }
 
   function requireConfig(): boolean {
     if (!isFirebaseConfigured || !auth) {
@@ -59,6 +69,7 @@ export default function SignInPage() {
       const confirmation = (window as unknown as { _confirm?: { confirm: (c: string) => Promise<unknown> } })._confirm;
       if (!confirmation) throw new Error("Please request an OTP first.");
       await confirmation.confirm(otp);
+      await trySyncUser();
       window.location.href = "/submit";
     } catch (e) {
       setNotice(errMessage(e));
@@ -74,6 +85,7 @@ export default function SignInPage() {
     try {
       const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
       await signInWithPopup(auth!, new GoogleAuthProvider());
+      await trySyncUser();
       window.location.href = role === "mp" ? "/dashboard" : "/submit";
     } catch (e) {
       setNotice(errMessage(e));
