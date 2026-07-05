@@ -2,11 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import {
+  GoogleAuthProvider,
+  RecaptchaVerifier,
+  signInWithEmailAndPassword,
+  signInWithPhoneNumber,
+  signInWithPopup,
+} from "firebase/auth";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
-import { syncUser } from "@/services/api";
+import { getMyProfile, syncUser } from "@/services/api";
 
 type Role = "citizen" | "mp";
 type Step = "phone" | "otp";
@@ -17,6 +24,8 @@ export default function SignInPage() {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -26,12 +35,25 @@ export default function SignInPage() {
     if (r === "mp") setRole("mp");
   }, []);
 
-  async function trySyncUser() {
+  // Sync with the backend, then route based on the REAL, server-granted
+  // "mp" claim — never on the role toggle above, which is just UI copy.
+  // Anyone can click "I'm an MP"; only the admin-curated allowlist can
+  // actually grant the mp custom claim (see /auth/sync on the backend).
+  async function finishSignIn() {
     try {
       const idToken = await auth!.currentUser!.getIdToken();
       await syncUser(idToken);
+      const tokenResult = await auth!.currentUser!.getIdTokenResult(true);
+      if (tokenResult.claims.role === "mp") {
+        window.location.href = "/dashboard";
+        return;
+      }
+      const freshToken = await auth!.currentUser!.getIdToken();
+      const profile = await getMyProfile(freshToken);
+      window.location.href = profile.is_onboarded ? "/profile" : "/onboarding";
     } catch (e) {
       console.error("Failed to sync user with backend", e);
+      window.location.href = "/onboarding";
     }
   }
 
@@ -50,7 +72,6 @@ export default function SignInPage() {
     if (!requireConfig()) return;
     setBusy(true);
     try {
-      const { RecaptchaVerifier, signInWithPhoneNumber } = await import("firebase/auth");
       const verifier = new RecaptchaVerifier(auth!, "recaptcha-container", { size: "invisible" });
       const confirmation = await signInWithPhoneNumber(auth!, normalizePhone(phone), verifier);
       (window as unknown as { _confirm: unknown })._confirm = confirmation;
@@ -69,8 +90,21 @@ export default function SignInPage() {
       const confirmation = (window as unknown as { _confirm?: { confirm: (c: string) => Promise<unknown> } })._confirm;
       if (!confirmation) throw new Error("Please request an OTP first.");
       await confirmation.confirm(otp);
-      await trySyncUser();
-      window.location.href = "/submit";
+      await finishSignIn();
+    } catch (e) {
+      setNotice(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function emailPasswordSignIn() {
+    setNotice(null);
+    if (!requireConfig()) return;
+    setBusy(true);
+    try {
+      await signInWithEmailAndPassword(auth!, email.trim(), password);
+      await finishSignIn();
     } catch (e) {
       setNotice(errMessage(e));
     } finally {
@@ -83,10 +117,8 @@ export default function SignInPage() {
     if (!requireConfig()) return;
     setBusy(true);
     try {
-      const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
       await signInWithPopup(auth!, new GoogleAuthProvider());
-      await trySyncUser();
-      window.location.href = role === "mp" ? "/dashboard" : "/submit";
+      await finishSignIn();
     } catch (e) {
       setNotice(errMessage(e));
     } finally {
@@ -221,9 +253,42 @@ export default function SignInPage() {
                 </>
               )
             ) : (
-              <div className="rounded-2xl border border-dashed border-[var(--color-line)] p-5 text-sm text-[var(--color-ink-soft)]">
-                {t.auth.mpSub}
-              </div>
+              <>
+                <div>
+                  <label className="label" htmlFor="mp-email">
+                    {t.auth.mpEmailLabel}
+                  </label>
+                  <input
+                    id="mp-email"
+                    type="email"
+                    autoComplete="email"
+                    className="field"
+                    placeholder="mp@example.gov.in"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="mp-password">
+                    {t.auth.mpPasswordLabel}
+                  </label>
+                  <input
+                    id="mp-password"
+                    type="password"
+                    autoComplete="current-password"
+                    className="field"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={emailPasswordSignIn}
+                  disabled={busy || !email || !password}
+                >
+                  {busy ? "…" : t.auth.mpSignInEmail}
+                </button>
+              </>
             )}
 
             <div className="flex items-center gap-4 py-1 text-xs text-[var(--color-ink-soft)]">

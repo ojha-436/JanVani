@@ -6,6 +6,10 @@
       "disallowLegacyRuntimeConfig": true,
       "ignore": [
         ".venv",
+        "venv",
+        "__pycache__",
+        "**/__pycache__",
+        "*.pyc",
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
@@ -19,10 +23,51 @@
   "auth": {
     "providers": {}
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "source": ".",
     "frameworksBackend": {
       "region": "asia-south1"
-    }
+    },
+    "headers": [
+      {
+        "source": "**/*.@(html)",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "/sign-in",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "/onboarding",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "/profile",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "/dashboard",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "/submit",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      }
+    ]
   }
 }

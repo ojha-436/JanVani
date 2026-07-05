@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     cloud_sql_password: str = ""
     cloud_sql_db: str = "janvaani"
 
+    # Firebase Storage bucket holding citizen complaint media — used to mint
+    # short-lived signed URLs server-side (see app/media.py) now that
+    # storage.rules denies direct public read.
+    firebase_storage_bucket: str = "vipasana-499205.firebasestorage.app"
+
     class Config:
         env_file = ".env"
 

@@ -12,6 +12,8 @@ class ComplaintCreate(BaseModel):
     lat: float | None = None
     lng: float | None = None
     anonymous: bool = False
+    audio_url: str | None = None
+    photo_url: str | None = None
 
 
 class ComplaintOut(BaseModel):
@@ -27,3 +29,8 @@ class ComplaintOut(BaseModel):
     anonymous: bool
     status: str
     created_at: datetime
+    audio_url: str | None
+    photo_url: str | None
+    verification_confidence: int | None
+    verification_status: str | None
+    verification_reasons: list[str] | None

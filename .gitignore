@@ -3,8 +3,12 @@
 /.pnp
 .pnp.js
 backend/venv/
-backend/__pycache__/
-backend/**/__pycache__/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# typescript
+*.tsbuildinfo
 
 # firebase
 .firebase/
@@ -22,6 +26,7 @@ next-env.d.ts
 # env / secrets
 .env
 .env*.local
+.env.development
 .env.production
 *-service-account.json
 gcp-key.json

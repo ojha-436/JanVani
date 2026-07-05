@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { useI18n } from "@/lib/i18n";
+import { useSession } from "@/lib/session";
+import { storage, auth } from "@/lib/firebase";
 import { submitComplaint } from "@/services/api";
 
 type Mode = "voice" | "text" | "photo";
 
 export default function SubmitPage() {
   const { t, locale } = useI18n();
+  const { ready, firebaseUser } = useSession();
   const [mode, setMode] = useState<Mode>("voice");
 
   // shared fields
@@ -34,6 +37,12 @@ export default function SubmitPage() {
   // submit state
   const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // "Anonymous" only hides the citizen's identity from the MP — sign-in is
+  // still required so we can attribute (privately) and prevent spam.
+  useEffect(() => {
+    if (ready && !firebaseUser) window.location.href = "/sign-in";
+  }, [ready, firebaseUser]);
 
   async function startRecording() {
     setError(null);
@@ -81,6 +90,13 @@ export default function SubmitPage() {
 
   const hasContent = Boolean(text.trim()) || Boolean(audioUrl) || Boolean(photoUrl);
 
+  async function uploadToStorage(blob: Blob, extension: string): Promise<string> {
+    const { ref, uploadBytes, getDownloadURL } = await import("firebase/storage");
+    const fileRef = ref(storage!, `complaints/${crypto.randomUUID()}.${extension}`);
+    await uploadBytes(fileRef, blob);
+    return getDownloadURL(fileRef);
+  }
+
   async function submit() {
     if (!hasContent) {
       setError("Please speak, type, or add a photo describing the need.");
@@ -89,16 +105,25 @@ export default function SubmitPage() {
     setStatus("sending");
     setError(null);
     try {
-      // Audio/photo capture stays local-only for now — media upload lands
-      // in a later phase once Cloud Storage + async processing exist.
-      await submitComplaint({
-        text,
-        locale,
-        category: category !== null ? t.submit.categories[category] : undefined,
-        location,
-        coords,
-        anonymous: anon,
-      });
+      const [uploadedAudioUrl, uploadedPhotoUrl] = await Promise.all([
+        audioBlob.current ? uploadToStorage(audioBlob.current, "webm") : Promise.resolve(undefined),
+        photoFile.current ? uploadToStorage(photoFile.current, photoFile.current.name.split(".").pop() || "jpg") : Promise.resolve(undefined),
+      ]);
+
+      const idToken = await auth!.currentUser!.getIdToken();
+      await submitComplaint(
+        {
+          text,
+          locale,
+          category: category !== null ? t.submit.categories[category] : undefined,
+          location,
+          coords,
+          anonymous: anon,
+          audioUrl: uploadedAudioUrl,
+          photoUrl: uploadedPhotoUrl,
+        },
+        idToken
+      );
       setStatus("done");
     } catch (e) {
       setStatus("error");
@@ -106,6 +131,7 @@ export default function SubmitPage() {
     }
   }
 
+  if (!ready || !firebaseUser) return null;
   if (status === "done") return <SuccessScreen />;
 
   const tabs: { id: Mode; label: string; icon: React.ReactNode }[] = [
