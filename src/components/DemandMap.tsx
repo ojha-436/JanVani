@@ -18,6 +18,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AREA_CENTROIDS } from "@/lib/publicData";
 import { CATEGORY_COLOR, CATEGORY_ORDER, type PublicSubmission } from "@/lib/sampleData";
+import { GoogleDemandMap } from "./GoogleDemandMap";
+
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+/**
+ * Demand map switcher: renders Google Maps when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ * is configured (falling back to the built-in SVG map if it fails to load),
+ * otherwise the dependency-free SVG map. Both share the same data + detail flow.
+ */
+export function DemandMap(props: { submissions: PublicSubmission[]; onSelect: (s: PublicSubmission) => void }) {
+  const [useGoogle, setUseGoogle] = useState(Boolean(MAPS_KEY));
+  if (useGoogle && MAPS_KEY) {
+    return (
+      <GoogleDemandMap
+        submissions={props.submissions}
+        apiKey={MAPS_KEY}
+        onSelect={props.onSelect}
+        onError={() => setUseGoogle(false)}
+      />
+    );
+  }
+  return <SvgDemandMap {...props} />;
+}
 
 const W = 820;
 const H = 520;
@@ -42,7 +65,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 type AreaAgg = { name: string; count: number; topCat: string; x: number; y: number };
 
-export function DemandMap({
+function SvgDemandMap({
   submissions,
   onSelect,
 }: {

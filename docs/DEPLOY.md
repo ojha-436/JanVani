@@ -165,6 +165,46 @@ gcloud scheduler jobs create http janvaani-recompute \
 
 ---
 
+## 6. Google Maps API key (optional — real map tiles)
+
+The demand map works with no key (built-in SVG map). To render **real Google
+Maps tiles**, add a free-tier browser key. Google Maps Platform includes a
+recurring **US$200/month free credit** — the JavaScript Maps load ("dynamic
+map") is ~US$7 per 1,000 loads, so a demo/pilot stays comfortably free.
+
+**Create the key**
+1. Go to **console.cloud.google.com** → project `vipasana-499205` → **APIs &
+   Services → Library** → enable **"Maps JavaScript API"**.
+2. **APIs & Services → Credentials → + Create credentials → API key.**
+3. Copy the key. Click **Edit** on it and set:
+   - **Application restrictions → Websites (HTTP referrers)** and add:
+     - `https://janvaani-1044819117404.asia-south1.run.app/*`
+     - `http://localhost:3000/*` (for local dev)
+   - **API restrictions → Restrict key →** select **Maps JavaScript API** only.
+4. (Recommended) In **Google Maps Platform → Billing**, set a budget alert.
+
+> The key is a **browser key** and ships in the client bundle by design — that's
+> why the HTTP-referrer restriction above is the real protection. Never use an
+> unrestricted key.
+
+**Activate it (build-time — a redeploy is required)**
+
+`NEXT_PUBLIC_*` values are baked in at build time, so a runtime env update is not
+enough — you must rebuild. Locally:
+
+```bash
+echo "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_KEY" >> .env.production
+gcloud run deploy janvaani --source . --project vipasana-499205 \
+  --region asia-south1 --allow-unauthenticated
+```
+
+Via CI/CD: add a repo secret **`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`** and push to
+`main` — `deploy.yml` writes it into the build. When the key is present the
+dashboard renders Google Maps; if it ever fails to load, it automatically falls
+back to the SVG map.
+
+---
+
 ## Pipeline summary
 
 ```

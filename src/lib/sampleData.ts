@@ -28,7 +28,7 @@ export type PublicSubmission = {
   location: string;
 };
 
-/** Category → brand colour (matches the dashboard theme tokens). */
+/** Category → brand colour CSS var (for in-DOM SVG that inherits theme tokens). */
 export const CATEGORY_COLOR: Record<string, string> = {
   "Roads & transport": "var(--color-marigold)",
   "Water & sanitation": "var(--color-terracotta)",
@@ -38,6 +38,19 @@ export const CATEGORY_COLOR: Record<string, string> = {
   Livelihood: "#5b7b8c",
   Other: "#9a8f78",
 };
+
+/** Category → resolved hex (for Google Maps marker icons, which can't use CSS vars). */
+export const CATEGORY_HEX: Record<string, string> = {
+  "Roads & transport": "#e39a1c",
+  "Water & sanitation": "#b64a34",
+  Education: "#263a63",
+  Health: "#4f6f60",
+  Electricity: "#8a5a44",
+  Livelihood: "#5b7b8c",
+  Other: "#9a8f78",
+};
+
+export const categoryHex = (c: string) => CATEGORY_HEX[c] ?? "#e39a1c";
 
 export const CATEGORY_ORDER: Category[] = [
   "Roads & transport",
