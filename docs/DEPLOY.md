@@ -119,7 +119,7 @@ echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/pro
 |---|---|
 | `GCP_REGION` | `asia-south1` |
 | `VERTEX_LOCATION` | `us-central1` |
-| `VERTEX_GEMINI_MODEL` | `gemini-2.0-flash-001` |
+| `VERTEX_GEMINI_MODEL` | `gemini-2.5-flash` (must be accessible in your project/region) |
 | `UPLOADS_BUCKET` | `janvaani-uploads` |
 
 > The `NEXT_PUBLIC_*` keys are Firebase **web** keys — public by design and safe
@@ -135,7 +135,7 @@ by hand from your machine instead:
 
 ```bash
 gcloud run deploy janvaani --source . --region $REGION --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1,VERTEX_GEMINI_MODEL=gemini-2.0-flash-001,UPLOADS_BUCKET=janvaani-uploads,SUBMISSION_SALT=<random>"
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1,VERTEX_GEMINI_MODEL=gemini-2.5-flash,UPLOADS_BUCKET=janvaani-uploads,SUBMISSION_SALT=<random>"
 ```
 
 Deploy the security rules (from step 1 of the app) with the Firebase CLI:

@@ -61,7 +61,7 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 4 \
-            --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT }},GOOGLE_CLOUD_LOCATION=${{ vars.VERTEX_LOCATION || 'us-central1' }},VERTEX_GEMINI_MODEL=${{ vars.VERTEX_GEMINI_MODEL || 'gemini-2.0-flash-001' }},UPLOADS_BUCKET=${{ vars.UPLOADS_BUCKET }},SUBMISSION_SALT=${{ secrets.SUBMISSION_SALT }}"
+            --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT }},GOOGLE_CLOUD_LOCATION=${{ vars.VERTEX_LOCATION || 'us-central1' }},VERTEX_GEMINI_MODEL=${{ vars.VERTEX_GEMINI_MODEL || 'gemini-2.5-flash' }},UPLOADS_BUCKET=${{ vars.UPLOADS_BUCKET }},SUBMISSION_SALT=${{ secrets.SUBMISSION_SALT }}"
 
       - name: Show service URL
         run: |

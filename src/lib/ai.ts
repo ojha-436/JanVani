@@ -14,7 +14,7 @@ import { AREA_NAMES, CONSTITUENCY_META } from "./publicData";
 // GOOGLE_CLOUD_PROJECT is set, so demo/local runs make no (paid) Vertex calls.
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
 const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
-const GEMINI_MODEL = process.env.VERTEX_GEMINI_MODEL || "gemini-2.0-flash-001";
+const GEMINI_MODEL = process.env.VERTEX_GEMINI_MODEL || "gemini-2.5-flash";
 const STT_LANG_FALLBACK = "en-IN";
 
 /** Is the AI/analysis stack wired (i.e. do we have a GCP project)? */
