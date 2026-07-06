@@ -1,16 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { DemandMap } from "@/components/DemandMap";
+import { SubmissionDetail } from "@/components/SubmissionDetail";
 import { useI18n } from "@/lib/i18n";
+import { useSession } from "@/lib/profile";
+import { CATEGORY_COLOR, type PublicSubmission } from "@/lib/sampleData";
 import {
   CONSTITUENCY,
   DEFAULT_WEIGHTS,
   FACTOR_COLORS,
   FACTOR_ORDER,
-  HOTSPOTS,
   THEMES,
   WORKS,
   confidence,
@@ -34,10 +38,45 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 
 export default function DashboardPage() {
   const { t } = useI18n();
+  const router = useRouter();
+  const { signOut } = useSession();
   const [weights, setWeights] = useState<Weights>({ ...DEFAULT_WEIGHTS });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
   const [live, setLive] = useState<LiveData | null>(null);
+
+  // Individual submissions for the demand map + recurring-needs drill-down.
+  const [subs, setSubs] = useState<PublicSubmission[]>([]);
+  const [detail, setDetail] = useState<PublicSubmission | null>(null);
+  const [openCat, setOpenCat] = useState<string | null>(null);
+
+  useEffect(() => {
+    let on = true;
+    fetch("/api/submissions")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (on && Array.isArray(d?.submissions)) setSubs(d.submissions);
+      })
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  // Submissions grouped by category, most-recent first (for the drill-down).
+  const byCat = useMemo(() => {
+    const m = new Map<string, PublicSubmission[]>();
+    for (const s of subs) {
+      if (!m.has(s.category)) m.set(s.category, []);
+      m.get(s.category)!.push(s);
+    }
+    return m;
+  }, [subs]);
+
+  function handleSignOut() {
+    signOut();
+    router.push("/");
+  }
 
   // Pull the latest computed ranking; fall back to the built-in sample
   // snapshot so the dashboard is never blank (e.g. demo mode / no data yet).
@@ -57,7 +96,6 @@ export default function DashboardPage() {
   }, []);
 
   const works = live?.works ?? WORKS;
-  const hotspots = live?.hotspots ?? HOTSPOTS;
   const themes = live?.themes ?? THEMES;
   const constituency = live?.constituency ?? CONSTITUENCY;
   const isLive = live !== null;
@@ -122,6 +160,14 @@ export default function DashboardPage() {
             <span className="hidden rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold sm:inline-block">
               {t.dash.office}
             </span>
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold transition-colors hover:border-[var(--color-terracotta)] hover:text-[var(--color-terracotta)]"
+              aria-label="Sign out"
+            >
+              <SignOutIcon />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
           </div>
         </div>
       </header>
@@ -217,59 +263,107 @@ export default function DashboardPage() {
           </aside>
         </div>
 
-        {/* ---- hotspots + themes ---- */}
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <section className="card p-6">
-            <h2 className="font-display text-xl" style={{ fontWeight: 560 }}>
-              {t.dash.hotspotsTitle}
-            </h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t.dash.hotspotsSub}</p>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {hotspots.map((a) => (
-                <div
-                  key={a.name}
-                  className="rounded-xl border border-[var(--color-line)] p-3"
-                  style={{ backgroundColor: `color-mix(in srgb, var(--color-marigold) ${Math.round(a.demand * 78)}%, #fffdf8)` }}
-                >
-                  <div className="text-sm font-semibold">{a.name}</div>
-                  <div className="text-xs text-[var(--color-ink-soft)]">{a.top}</div>
-                  <div className="mt-1 font-display text-lg" style={{ fontWeight: 560 }}>
-                    {Math.round(a.demand * 100)}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex items-center gap-2 text-xs text-[var(--color-ink-soft)]">
-              <span>low</span>
-              <span className="h-2 flex-1 rounded-full" style={{ background: "linear-gradient(90deg, #fffdf8, var(--color-marigold))" }} />
-              <span>high demand</span>
-            </div>
-          </section>
+        {/* ---- demand map ---- */}
+        <section className="card mt-8 p-6">
+          <h2 className="font-display text-xl" style={{ fontWeight: 560 }}>
+            {t.dash.hotspotsTitle}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            {t.dash.hotspotsSub} Zoom in to resolve area counts into individual citizen queries; click any point for the full submission.
+          </p>
+          <div className="mt-4">
+            <DemandMap submissions={subs} onSelect={setDetail} />
+          </div>
+        </section>
 
-          <section className="card p-6">
-            <h2 className="font-display text-xl" style={{ fontWeight: 560 }}>
-              {t.dash.themesTitle}
-            </h2>
-            <div className="mt-5 space-y-3.5">
-              {themes.map((th) => {
-                const max = themes[0]?.count || 1;
-                return (
-                  <div key={th.category}>
-                    <div className="flex items-baseline justify-between text-sm">
-                      <span className="font-medium">{th.category}</span>
-                      <span className="tabular-nums text-[var(--color-ink-soft)]">{fmt(th.count)}</span>
+        {/* ---- recurring needs (themes) with drill-down ---- */}
+        <section className="card mt-6 p-6">
+          <h2 className="font-display text-xl" style={{ fontWeight: 560 }}>
+            {t.dash.themesTitle}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Click a need to read the citizen voices behind it.</p>
+          <div className="mt-5 space-y-2.5">
+            {themes.map((th) => {
+              const max = themes[0]?.count || 1;
+              const list = byCat.get(th.category) ?? [];
+              const isOpen = openCat === th.category;
+              return (
+                <div key={th.category} className="rounded-xl border border-[var(--color-line)]">
+                  <button
+                    onClick={() => setOpenCat((c) => (c === th.category ? null : th.category))}
+                    className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+                    aria-expanded={isOpen}
+                  >
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold text-[#fffdf8]"
+                      style={{ backgroundColor: CATEGORY_COLOR[th.category] ?? th.tone }}
+                    >
+                      {isOpen ? "−" : "+"}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between text-sm">
+                        <span className="font-semibold">{th.category}</span>
+                        <span className="tabular-nums text-[var(--color-ink-soft)]">{fmt(th.count)}</span>
+                      </span>
+                      <span className="mt-1.5 block h-2 overflow-hidden rounded-full bg-[var(--color-paper-deep)]">
+                        <span className="block h-full rounded-full" style={{ width: `${(th.count / max) * 100}%`, backgroundColor: CATEGORY_COLOR[th.category] ?? th.tone }} />
+                      </span>
+                    </span>
+                  </button>
+
+                  {isOpen && (
+                    <div className="border-t border-[var(--color-line)] px-3.5 py-3">
+                      {list.length === 0 ? (
+                        <p className="text-sm text-[var(--color-ink-soft)]">No individual submissions loaded for this need yet.</p>
+                      ) : (
+                        <>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+                            {list.length} citizen {list.length === 1 ? "voice" : "voices"} · click for detail
+                          </p>
+                          <ul className="grid gap-2 sm:grid-cols-2">
+                            {list.slice(0, 12).map((s) => (
+                              <li key={s.id}>
+                                <button
+                                  onClick={() => setDetail(s)}
+                                  className="w-full rounded-lg border border-[var(--color-line)] p-2.5 text-left transition-colors hover:border-[var(--color-ink-soft)]"
+                                >
+                                  <span className="line-clamp-2 text-sm">“{s.need_en}”</span>
+                                  <span className="mt-1 flex items-center gap-2 text-xs text-[var(--color-ink-soft)]">
+                                    <span className="font-medium">{s.area}</span>
+                                    <span>·</span>
+                                    <span>{s.verified ? "✓ verified" : "anonymous"}</span>
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                          {list.length > 12 && (
+                            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">+ {list.length - 12} more in this need</p>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-[var(--color-paper-deep)]">
-                      <div className="h-full rounded-full" style={{ width: `${(th.count / max) * 100}%`, backgroundColor: th.tone }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </main>
+
+      <SubmissionDetail submission={detail} onClose={() => setDetail(null)} />
     </div>
+  );
+}
+
+/* ---------------- Sign-out icon ---------------- */
+function SignOutIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
   );
 }
 

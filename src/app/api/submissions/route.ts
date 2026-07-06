@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createHash, randomUUID } from "crypto";
 import { getBucket, getDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { describePhoto, extractNeed, geocodeToArea, transcribeAudio } from "@/lib/ai";
+import { areaCentroid } from "@/lib/publicData";
+import { sampleSubmissions, type PublicSubmission } from "@/lib/sampleData";
 
 /* ------------------------------------------------------------------
    POST /api/submissions
@@ -133,6 +135,65 @@ export async function POST(req: Request) {
     console.error("submission error", err);
     return NextResponse.json({ ok: false, error: "Invalid submission" }, { status: 400 });
   }
+}
+
+/* ------------------------------------------------------------------
+   GET /api/submissions — dashboard-facing list (map + drill-down).
+
+   Live: latest submissions from Firestore, mapped to the safe
+   PublicSubmission shape (anonymity respected, no PII beyond a verified
+   name). Demo: a deterministic realistic sample so the map and
+   recurring-needs drill-down are fully interactive without a database.
+   ------------------------------------------------------------------ */
+export async function GET() {
+  const db = getDb();
+  if (!db) {
+    return NextResponse.json({ source: "sample", submissions: sampleSubmissions() });
+  }
+  try {
+    const snap = await db.collection("submissions").orderBy("createdAt", "desc").limit(500).get();
+    if (snap.empty) return NextResponse.json({ source: "sample", submissions: sampleSubmissions() });
+
+    const submissions: PublicSubmission[] = snap.docs.map((d) => {
+      const x = d.data();
+      const area = String(x.area ?? "");
+      const anonymous = Boolean(x.anonymous ?? true);
+      const coords =
+        x.coords && typeof x.coords.lat === "number" && typeof x.coords.lng === "number"
+          ? { lat: x.coords.lat, lng: x.coords.lng }
+          : jitterCoords(area, d.id);
+      return {
+        id: d.id,
+        category: String(x.category ?? "Other"),
+        area,
+        need_en: String(x.need_en ?? ""),
+        coords,
+        createdAt: String(x.createdAt ?? new Date().toISOString()),
+        anonymous,
+        verified: !anonymous && Boolean(x.verifiedName),
+        submitter: anonymous ? "Anonymous citizen" : String(x.verifiedName || "Verified citizen"),
+        locale: String(x.locale ?? "en"),
+        urgency: typeof x.urgency === "number" ? x.urgency : 0.6,
+        hasPhoto: Boolean(x.hasPhoto),
+        hasAudio: Boolean(x.hasAudio),
+        location: String(x.location ?? area),
+      };
+    });
+    return NextResponse.json({ source: "live", submissions });
+  } catch (err) {
+    console.warn("[submissions] list failed, using sample:", (err as Error).message);
+    return NextResponse.json({ source: "sample", submissions: sampleSubmissions() });
+  }
+}
+
+/** Stable pseudo-coords around an area centroid for records lacking GPS. */
+function jitterCoords(area: string, id: string): { lat: number; lng: number } {
+  const c = areaCentroid(area);
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  const dx = ((h % 1000) / 1000 - 0.5) * 0.045;
+  const dy = (((h >> 10) % 1000) / 1000 - 0.5) * 0.05;
+  return { lat: c.lat + dx, lng: c.lng + dy };
 }
 
 function safeParse(s: string): { lat: number; lng: number } | null {

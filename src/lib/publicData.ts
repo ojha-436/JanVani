@@ -129,6 +129,24 @@ export const AREAS: AreaData[] = [
 
 export const AREA_NAMES: string[] = AREAS.map((a) => a.name);
 
+/** Approximate block/town centroids in Nawada district (Bihar), for the
+ *  demand map. Real geocoding to ward/village runs via Google Maps in prod. */
+export const AREA_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+  "Nawada town": { lat: 24.886, lng: 85.543 },
+  Rajauli: { lat: 24.646, lng: 85.598 },
+  Meskaur: { lat: 24.702, lng: 85.66 },
+  Akbarpur: { lat: 24.752, lng: 85.502 },
+  Kauakol: { lat: 24.804, lng: 85.752 },
+  Warisaliganj: { lat: 25.003, lng: 85.63 },
+  Hisua: { lat: 24.833, lng: 85.412 },
+  Pakribarawan: { lat: 24.905, lng: 85.474 },
+};
+
+/** Centroid for an area, defaulting to the constituency centre. */
+export function areaCentroid(name: string): { lat: number; lng: number } {
+  return AREA_CENTROIDS[name] ?? AREA_CENTROIDS["Nawada town"];
+}
+
 const AREA_BY_NAME: Record<string, AreaData> = Object.fromEntries(AREAS.map((a) => [a.name, a]));
 
 /** Look up an area, defaulting to the first (busiest) if unknown. */
