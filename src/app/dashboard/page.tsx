@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
@@ -16,9 +16,19 @@ import {
   confidence,
   scoreWork,
   type FactorKey,
+  type HotspotArea,
+  type Theme,
   type Weights,
   type Work,
 } from "@/lib/dashboardData";
+
+/** Live ranking snapshot as returned by GET /api/rankings. */
+type LiveData = {
+  works: Work[];
+  hotspots: HotspotArea[];
+  themes: Theme[];
+  constituency: typeof CONSTITUENCY;
+};
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -27,13 +37,37 @@ export default function DashboardPage() {
   const [weights, setWeights] = useState<Weights>({ ...DEFAULT_WEIGHTS });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
+  const [live, setLive] = useState<LiveData | null>(null);
+
+  // Pull the latest computed ranking; fall back to the built-in sample
+  // snapshot so the dashboard is never blank (e.g. demo mode / no data yet).
+  useEffect(() => {
+    let on = true;
+    fetch("/api/rankings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (on && d?.source === "live" && Array.isArray(d.works) && d.works.length) {
+          setLive({ works: d.works, hotspots: d.hotspots ?? [], themes: d.themes ?? [], constituency: d.constituency ?? CONSTITUENCY });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  const works = live?.works ?? WORKS;
+  const hotspots = live?.hotspots ?? HOTSPOTS;
+  const themes = live?.themes ?? THEMES;
+  const constituency = live?.constituency ?? CONSTITUENCY;
+  const isLive = live !== null;
 
   const ranked = useMemo(
     () =>
-      [...WORKS]
+      [...works]
         .map((w) => ({ w, s: scoreWork(w.factors, weights) }))
         .sort((a, b) => b.s - a.s),
-    [weights]
+    [weights, works]
   );
 
   const wsum = FACTOR_ORDER.reduce((a, k) => a + weights[k], 0) || 1;
@@ -43,14 +77,14 @@ export default function DashboardPage() {
   }
 
   const compareWorks = compare
-    .map((id) => WORKS.find((w) => w.id === id))
+    .map((id) => works.find((w) => w.id === id))
     .filter((w): w is Work => Boolean(w));
 
   const kpis = [
-    { v: fmt(CONSTITUENCY.voices), l: t.dash.kpiVoices },
-    { v: fmt(CONSTITUENCY.themes), l: t.dash.kpiThemes },
-    { v: fmt(CONSTITUENCY.areas), l: t.dash.kpiAreas },
-    { v: `${CONSTITUENCY.verifiedPct}%`, l: t.dash.kpiVerified },
+    { v: fmt(constituency.voices), l: t.dash.kpiVoices },
+    { v: fmt(constituency.themes), l: t.dash.kpiThemes },
+    { v: fmt(constituency.areas), l: t.dash.kpiAreas },
+    { v: `${constituency.verifiedPct}%`, l: t.dash.kpiVerified },
   ];
 
   return (
@@ -68,11 +102,22 @@ export default function DashboardPage() {
                 {t.dash.badge}
               </p>
               <p className="text-sm font-semibold leading-tight">
-                {CONSTITUENCY.name}, {CONSTITUENCY.state}
+                {constituency.name}, {constituency.state}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <span
+              className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold sm:inline-flex"
+              style={{
+                backgroundColor: isLive ? "rgba(79,111,96,0.16)" : "rgba(227,154,28,0.16)",
+                color: isLive ? "var(--color-sage)" : "var(--color-marigold-deep)",
+              }}
+              title={isLive ? "Ranked from live citizen submissions" : "Sample snapshot — submit voices and recompute to go live"}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: isLive ? "var(--color-sage)" : "var(--color-marigold-deep)" }} />
+              {isLive ? "Live data" : "Sample data"}
+            </span>
             <LanguageSwitcher />
             <span className="hidden rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold sm:inline-block">
               {t.dash.office}
@@ -180,7 +225,7 @@ export default function DashboardPage() {
             </h2>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t.dash.hotspotsSub}</p>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {HOTSPOTS.map((a) => (
+              {hotspots.map((a) => (
                 <div
                   key={a.name}
                   className="rounded-xl border border-[var(--color-line)] p-3"
@@ -206,8 +251,8 @@ export default function DashboardPage() {
               {t.dash.themesTitle}
             </h2>
             <div className="mt-5 space-y-3.5">
-              {THEMES.map((th) => {
-                const max = THEMES[0].count;
+              {themes.map((th) => {
+                const max = themes[0]?.count || 1;
                 return (
                   <div key={th.category}>
                     <div className="flex items-baseline justify-between text-sm">

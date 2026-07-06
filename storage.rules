@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// ------------------------------------------------------------------
+// JanVaani Cloud Storage rules — private bucket, server-mediated.
+//
+// Citizen voice notes and photos are uploaded by the server (Admin SDK)
+// and, when needed, served via short-lived signed URLs. No public or
+// client access: deny everything at the rules layer as defence in depth.
+// ------------------------------------------------------------------
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

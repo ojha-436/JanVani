@@ -23,8 +23,8 @@ Four constraints drove every decision: **lightweight to load**, **secure**,
 | Auth | **Firebase Auth** — Phone OTP + Google | Citizens sign in by phone number + SMS OTP (no password, no literacy barrier); MPs use Google. |
 | Database | **Firestore** | Serverless, scales to zero, generous free tier; geo-hotspots via geohash. |
 | Uploads | **Cloud Storage** (signed URLs) | Voice/photo go straight to a private bucket, never bloating the server. |
-| Speech→Text | **Cloud Speech-to-Text v2 (Chirp)** | Strong Indian-language coverage, pay-per-use. |
-| AI (classify / cluster / translate) | **Claude Haiku 4.5 on Vertex AI** | Latest Claude, GCP-native, cheapest capable tier. **Batched on new data + cached** for cost control. |
+| Speech→Text | **Cloud Speech-to-Text (Chirp)** | Strong Indian-language coverage, pay-per-use. |
+| AI (extract / classify / photo / rationale) | **Gemini on Vertex AI** | Organiser-recommended, GCP-native, cheap Flash tier. Guarded so the app runs with or without it. |
 
 **Cost principle:** everything scales to zero; AI runs in **batches on new data
 only**, never per-request. **Security:** Firebase ID tokens + Firestore rules +
@@ -46,14 +46,23 @@ src/
     onboarding/page.tsx   # One-time profile capture (2nd layer after sign-in)
     profile/page.tsx      # View & edit your details; sign out
     submit/page.tsx       # Multi-modal submission (voice·text·photo) + anonymous / Aadhaar-verified choice
-    api/submissions/route.ts  # Accepts a submission; documents the GCP pipeline
+    dashboard/page.tsx    # MP dashboard — live ranking (falls back to sample data)
+    api/submissions/route.ts  # Ingestion pipeline: Storage · STT · Gemini · Firestore
+    api/recompute/route.ts    # Batch: cluster + 6-factor rank + rationale → rankings/latest
+    api/rankings/route.ts     # Serves the latest ranking snapshot to the dashboard
   components/             # Logo, Header (session-aware), Footer, LanguageSwitcher
   lib/
     i18n.tsx              # Typed dictionaries + language context (EN/HI live)
     firebase.ts           # Guarded client init (runs even without keys)
+    firebaseAdmin.ts      # Guarded server Admin SDK (Firestore + Storage)
+    ai.ts                 # Gemini extraction/vision/rationale + Speech-to-Text (all guarded)
+    ranking.ts            # The 6-factor explainable ranking engine
+    publicData.ts         # Seeded Census/UDISE/NFHS/CGWB/IMD snapshot (the objectivity layer)
     profile.tsx           # Session + profile store (localStorage now → Firestore later)
     constants.ts          # Indian states / UTs
-docs/                     # PRD.md (spec) + ARCHITECTURE.md (analysis & ranking engine)
+docs/                     # PRD.md · ARCHITECTURE.md (ranking engine) · DEPLOY.md (CI/CD)
+firestore.rules · storage.rules · firebase.json   # Server-mediated security
+.github/workflows/        # ci.yml (checks) + deploy.yml (Cloud Run via WIF)
 Dockerfile                # Multi-stage → tiny Cloud Run image
 ```
 
@@ -104,14 +113,29 @@ Application Default Credentials — **no key files in the container**.
 
 ---
 
+## Backend & data flow (implemented)
+
+`POST /api/submissions` runs the ingestion pipeline: Cloud Storage upload →
+Speech-to-Text → Gemini photo description → Gemini structured extraction →
+geocode → Firestore write. `POST /api/recompute` clusters submissions, runs the
+**6-factor ranking engine** (`src/lib/ranking.ts`) against a seeded public-data
+snapshot, generates a Gemini "why this rank" rationale, and writes
+`rankings/latest`. The MP dashboard reads it via `GET /api/rankings` and falls
+back to a sample snapshot when empty. Every cloud call is **guarded** — with no
+`GOOGLE_CLOUD_PROJECT` the app runs fully in demo mode. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §11 and [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Roadmap (per the PRD)
 
-- [x] Landing, sign-in, multi-modal submission (this repo)
-- [ ] Speech-to-Text + Claude Haiku classification pipeline (batched)
-- [ ] Firestore theme/hotspot aggregation
-- [ ] MP dashboard: ranked priority list + demand heatmap + drill-down
-- [ ] Explainable ranking engine (demand × population × existing-gap)
-- [ ] Public-dataset seeding (Census / UDISE enrolment)
+- [x] Landing, sign-in, multi-modal submission
+- [x] Speech-to-Text + Gemini extraction pipeline (per-request)
+- [x] Firestore persistence + theme/hotspot aggregation (recompute job)
+- [x] MP dashboard: ranked list + demand heatmap + drill-down (live data)
+- [x] Explainable 6-factor ranking engine (server-side) + weight sliders
+- [x] Public-dataset snapshot feeding the Gap/Population/Equity factors
+- [x] CI/CD: GitHub Actions → Cloud Run (Workload Identity Federation)
+- [ ] Scale path: Pub/Sub batching + BigQuery ranking + Cloud Scheduler
+- [ ] Live public-data APIs; Dialogflow SMS/IVR intake
 
 ---
 

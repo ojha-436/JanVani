@@ -1,0 +1,15 @@
+# Keep the Cloud Build source upload small — the image is built in the cloud.
+.git
+.gitignore
+node_modules
+.next
+out
+build
+npm-debug.log*
+.env
+.env*.local
+.claude
+docs
+README.md
+*-service-account.json
+gcp-key.json
