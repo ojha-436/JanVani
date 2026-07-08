@@ -1,6 +1,6 @@
 name: CI
 
-# Lint, type-check and build on every PR and every push to main.
+# Type-check and build on every PR and every push to main.
 # Keeps the default branch always deployable.
 
 on:
@@ -26,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint --if-present
+      # `next lint` was removed in Next 16 and this project has no standalone
+      # ESLint config, so linting is not a CI gate. Type-check + build are.
 
       - name: Type-check
         run: npm run typecheck
