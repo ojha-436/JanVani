@@ -5,6 +5,8 @@ import { describePhoto, extractNeed, geocodeToArea, transcribeAudio } from "@/li
 import { areaCentroid, CONSTITUENCY_META, maxDeficitArea, nearestArea, type Category } from "@/lib/publicData";
 import { recomputeAndStore } from "@/lib/recompute";
 import { sampleSubmissions, type PublicSubmission } from "@/lib/sampleData";
+import { sanitizeText, sanitizeLine, withinUploadLimit, MAX_TEXT_LEN, MAX_NAME_LEN } from "@/lib/security/validation";
+import { rateLimit, clientKey } from "@/lib/security/rateLimit";
 
 /* ------------------------------------------------------------------
    POST /api/submissions
@@ -41,23 +43,30 @@ async function toBuffer(file: unknown): Promise<Buffer> {
 
 export async function POST(req: Request) {
   try {
+    // Rate limit per client — bounds spam / cost on the ingestion + AI path.
+    const rl = rateLimit(clientKey(req, "submit"), 20, 60_000);
+    if (!rl.ok) return NextResponse.json({ ok: false, error: "Too many submissions — please wait a moment." }, { status: 429 });
+
     const form = await req.formData();
 
-    const text = String(form.get("text") ?? "").trim();
-    const locale = String(form.get("locale") ?? "en");
-    const categoryHint = String(form.get("category") ?? "").trim();
-    const constituency = String(form.get("constituency") ?? "").trim();
-    const location = String(form.get("location") ?? "").trim();
+    const text = sanitizeText(form.get("text"), MAX_TEXT_LEN);
+    const locale = sanitizeLine(form.get("locale"), 12) || "en";
+    const categoryHint = sanitizeLine(form.get("category"), 40);
+    const constituency = sanitizeLine(form.get("constituency"), MAX_NAME_LEN);
+    const location = sanitizeLine(form.get("location"), MAX_NAME_LEN);
     const coords = form.get("coords") ? safeParse(String(form.get("coords"))) : null;
     const anonymous = form.get("anonymous") !== "false"; // default anonymous
-    const verifiedName = String(form.get("verifiedName") ?? "").trim();
-    const aadhaarLast4 = String(form.get("aadhaarLast4") ?? "").trim();
+    const verifiedName = sanitizeLine(form.get("verifiedName"), MAX_NAME_LEN);
+    const aadhaarLast4 = sanitizeLine(form.get("aadhaarLast4"), 4);
 
     const id = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
-    // ---- media → buffers ----
+    // ---- media → buffers (size-capped: reject oversized uploads) ----
     const audioBuf = await toBuffer(form.get("audio"));
     const photoBuf = await toBuffer(form.get("photo"));
+    if (!withinUploadLimit(audioBuf.length) || !withinUploadLimit(photoBuf.length)) {
+      return NextResponse.json({ ok: false, error: "Attachment too large (max 8 MB each)." }, { status: 413 });
+    }
     const photoMime = form.get("photo") instanceof File ? (form.get("photo") as File).type || "image/jpeg" : "image/jpeg";
 
     // ---- 1. upload media (non-fatal) ----

@@ -3,29 +3,26 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/firebaseAdmin";
 import { inviteLink, type MpAllocation } from "@/lib/mp";
 import { resolveConstituency } from "@/lib/constituencies";
+import { requireAdmin } from "@/lib/security/auth";
 
 /* ------------------------------------------------------------------
    MP provisioning (admin only).
 
-   POST /api/mp  { adminKey, email, name, constituency }
+   POST /api/mp  { email, name, constituency }  (admin key via x-admin-key)
         → creates an mpAccounts record + a one-time invite link. No shared
           passwords: the admin allocates a constituency to an email and
           sends the returned link.
-   GET  /api/mp?adminKey=...  → list all allocations for the console.
+   GET  /api/mp  (admin key via x-admin-key)  → list all allocations.
 
-   Gated by a single server-side admin key (MP_ADMIN_KEY). This is a
-   pragmatic gate for the pilot; production replaces it with a real
-   super-admin role on a verified Firebase Auth identity.
+   Gated by a single server-side admin key (MP_ADMIN_KEY), verified in
+   constant time and read from the `x-admin-key` header (see
+   src/lib/security/auth.ts). Fails CLOSED when the key is unset — no
+   guessable default. Production replaces this with a super-admin role on
+   a verified Firebase Auth identity.
    ------------------------------------------------------------------ */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const ADMIN_KEY = process.env.MP_ADMIN_KEY || "janvaani-admin-2026";
-
-function authed(key: string | null): boolean {
-  return Boolean(key) && key === ADMIN_KEY;
-}
 
 export async function POST(req: Request) {
   const db = getDb();
@@ -37,7 +34,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid body." }, { status: 400 });
   }
-  if (!authed(body.adminKey ?? null)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+  if (!requireAdmin(req, body.adminKey ?? null)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
 
   const email = String(body.email ?? "").trim().toLowerCase();
   const name = String(body.name ?? "").trim();
@@ -76,8 +73,7 @@ export async function GET(req: Request) {
   const db = getDb();
   if (!db) return NextResponse.json({ ok: false, reason: "no-db", items: [] });
 
-  const key = new URL(req.url).searchParams.get("adminKey");
-  if (!authed(key)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+  if (!requireAdmin(req)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
 
   try {
     const snap = await db.collection("mpAccounts").get();
@@ -103,7 +99,7 @@ export async function PATCH(req: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid body." }, { status: 400 });
   }
-  if (!authed(body.adminKey ?? null)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+  if (!requireAdmin(req, body.adminKey ?? null)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
 
   const token = String(body.token ?? "").trim();
   const action = body.action === "reactivate" ? "reactivate" : body.action === "deactivate" ? "deactivate" : null;

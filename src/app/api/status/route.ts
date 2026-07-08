@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/firebaseAdmin";
 import { WORK_STATUSES, WORKS, type WorkStatusValue } from "@/lib/dashboardData";
+import { rateLimit, clientKey } from "@/lib/security/rateLimit";
+import { sanitizeText, sanitizeLine, MAX_NOTE_LEN } from "@/lib/security/validation";
 
 /* ------------------------------------------------------------------
    The accountability loop.
@@ -90,21 +92,24 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const rl = rateLimit(clientKey(req, "status"), 60, 60_000);
+  if (!rl.ok) return NextResponse.json({ ok: false, error: "Too many status updates — try again shortly." }, { status: 429 });
+
   const db = getDb();
   if (!db) return NextResponse.json({ ok: false, reason: "no-db", note: "Status tracking needs the live database." }, { status: 200 });
 
   try {
     const body = await req.json();
-    const workId = String(body.workId ?? "").trim();
-    const status = String(body.status ?? "").trim() as WorkStatusValue;
+    const workId = sanitizeLine(body.workId, 200);
+    const status = sanitizeLine(body.status, 20) as WorkStatusValue;
     if (!workId || !WORK_STATUSES.includes(status)) {
       return NextResponse.json({ ok: false, error: "workId and a valid status are required." }, { status: 400 });
     }
     await db.collection("workStatus").doc(workId).set(
       {
         status,
-        note: body.note ? String(body.note).slice(0, 500) : null,
-        workTitle: body.workTitle ? String(body.workTitle).slice(0, 200) : null,
+        note: body.note ? sanitizeText(body.note, MAX_NOTE_LEN) : null,
+        workTitle: body.workTitle ? sanitizeLine(body.workTitle, 200) : null,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }

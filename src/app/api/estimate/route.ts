@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/firebaseAdmin";
 import { estimateFeasibility } from "@/lib/ai";
 import { fallbackEstimate, type CostEstimate } from "@/lib/estimate";
+import { rateLimit, clientKey } from "@/lib/security/rateLimit";
 
 /* ------------------------------------------------------------------
    POST /api/estimate  { submissionId?, need, category, area, constituency?, refresh? }
@@ -23,6 +24,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  // Cap the Gemini-backed agent per client to bound cost.
+  const rl = rateLimit(clientKey(req, "estimate"), 30, 60_000);
+  if (!rl.ok) return NextResponse.json({ ok: false, error: "Too many estimate requests — try again shortly." }, { status: 429 });
+
   let body: { submissionId?: string; need?: string; category?: string; area?: string; constituency?: string; refresh?: boolean };
   try {
     body = await req.json();

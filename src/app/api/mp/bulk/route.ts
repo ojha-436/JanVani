@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/firebaseAdmin";
 import { inviteLink, type MpAllocation } from "@/lib/mp";
 import { resolveConstituency } from "@/lib/constituencies";
+import { requireAdmin } from "@/lib/security/auth";
 
 /* ------------------------------------------------------------------
    Bulk MP provisioning (admin).
@@ -20,7 +21,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ADMIN_KEY = process.env.MP_ADMIN_KEY || "janvaani-admin-2026";
 const MAX_ROWS = 500;
 
 const TEMPLATE_HEADERS = ["email", "name", "constituency"];
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: "Expected a multipart upload." }, { status: 400 });
   }
-  if (String(form.get("adminKey") ?? "") !== ADMIN_KEY) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
+  if (!requireAdmin(req, String(form.get("adminKey") ?? ""))) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
 
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "No file uploaded (field: file)." }, { status: 400 });

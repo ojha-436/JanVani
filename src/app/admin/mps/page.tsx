@@ -44,7 +44,7 @@ export default function AdminMpsPage() {
   }, []);
 
   const load = useCallback(async (k: string) => {
-    const res = await fetch(`/api/mp?adminKey=${encodeURIComponent(k)}`);
+    const res = await fetch("/api/mp", { headers: { "x-admin-key": k } });
     const data = await res.json();
     if (data.ok) {
       setItems(data.items);
@@ -69,8 +69,8 @@ export default function AdminMpsPage() {
     try {
       const res = await fetch("/api/mp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminKey: key, ...form }),
+        headers: { "Content-Type": "application/json", "x-admin-key": key },
+        body: JSON.stringify(form),
       });
       const data = await res.json();
       if (data.ok) {
@@ -92,9 +92,8 @@ export default function AdminMpsPage() {
     setMsg(null);
     try {
       const fd = new FormData();
-      fd.append("adminKey", key);
       fd.append("file", file);
-      const res = await fetch("/api/mp/bulk", { method: "POST", body: fd });
+      const res = await fetch("/api/mp/bulk", { method: "POST", headers: { "x-admin-key": key }, body: fd });
       const data = await res.json();
       if (data.ok) {
         setBulkResult({ created: data.created, failed: data.failed, results: data.results });
@@ -110,8 +109,8 @@ export default function AdminMpsPage() {
   async function changeAccess(token: string, action: "deactivate" | "reactivate") {
     await fetch("/api/mp", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ adminKey: key, token, action }),
+      headers: { "Content-Type": "application/json", "x-admin-key": key },
+      body: JSON.stringify({ token, action }),
     }).catch(() => {});
     load(key);
   }

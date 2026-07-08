@@ -11,6 +11,7 @@ import {
   type Factors,
   type WorkStatusValue,
 } from "@/lib/dashboardData";
+import { rateLimit, clientKey } from "@/lib/security/rateLimit";
 
 /* ------------------------------------------------------------------
    POST /api/assistant  { message, history? }
@@ -30,6 +31,9 @@ export const maxDuration = 30;
 type RankWork = { id: string; title: string; category: string; area: string; demand: number; factors: Factors; trend?: { direction: string; changePct: number } };
 
 export async function POST(req: Request) {
+  const rl = rateLimit(clientKey(req, "assistant"), 30, 60_000);
+  if (!rl.ok) return NextResponse.json({ reply: "You're sending messages too quickly — please wait a moment." }, { status: 429 });
+
   let message = "";
   let history: { role: "user" | "assistant"; content: string }[] = [];
   try {

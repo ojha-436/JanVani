@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/firebaseAdmin";
 import { recomputeAndStore } from "@/lib/recompute";
+import { rateLimit, clientKey } from "@/lib/security/rateLimit";
 
 /* ------------------------------------------------------------------
    POST /api/recompute
@@ -20,7 +21,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST() {
+export async function POST(req: Request) {
+  // Expensive (full recluster + rank + Gemini rationale) — cap per client.
+  const rl = rateLimit(clientKey(req, "recompute"), 20, 60_000);
+  if (!rl.ok) return NextResponse.json({ ok: false, error: "Too many recompute requests — try again shortly." }, { status: 429 });
+
   const db = getDb();
   if (!db) {
     return NextResponse.json({ ok: false, reason: "no-db", note: "Firestore not configured (demo mode)." }, { status: 200 });
