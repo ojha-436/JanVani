@@ -1,13 +1,20 @@
 name: Deploy to Cloud Run
 
 # Builds from source (Cloud Build reads the Dockerfile) and deploys to
-# Cloud Run on every push to main. Auth is via Workload Identity
-# Federation — no long-lived service-account JSON key in the repo.
-# See docs/DEPLOY.md for the one-time GCP + GitHub setup.
+# Cloud Run. Auth is via Workload Identity Federation — no long-lived
+# service-account JSON key in the repo. See docs/DEPLOY.md for setup.
+#
+# MANUAL-ONLY: auto-deploy on push to main is disabled because this repo
+# does not yet have the WIF secrets configured (WIF_PROVIDER,
+# WIF_SERVICE_ACCOUNT, GCP_PROJECT) — without them the auth step fails on
+# every push. Once those secrets are set (docs/DEPLOY.md §2–3), re-enable
+# auto-deploy by adding back:
+#   push:
+#     branches: [main]
+# Until then, run it from the Actions tab ("Run workflow"). Day-to-day
+# deploys are done with: gcloud run deploy janvaani --source .
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
