@@ -1,0 +1,7 @@
+# Test-only dependencies — install on top of requirements.txt:
+#   venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+# Tests run WITHOUT a database or Google Cloud access by design (see
+# docs/TESTING.md): pure-rule modules are tested directly; endpoint
+# validation is tested via TestClient with dependency overrides.
+pytest>=8.0
+httpx>=0.27

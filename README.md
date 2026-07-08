@@ -21,19 +21,42 @@ and a government-data upload pipeline.
 
 ## What's built
 
-### Citizen side (`/`, `/sign-in`, `/submit`)
+### Citizen side (`/`, `/sign-in`, `/submit`, `/my-complaints`, `/guide`, `/about`)
 - Phone-OTP sign-in (Firebase Auth), multi-modal complaint submission — voice,
   typed text, or photo.
 - Voice complaints are transcribed automatically (Gemini audio understanding);
   photo-only complaints get an AI-generated one-line description. Both used to
   save with blank text — fixed.
-- Full i18n (English / Hindi, more dictionaries scaffolded).
+- **Submit-flow assists**: deterministic category-suggestion chips (fixed
+  keyword rules in `backend/app/classify.py`, citizen always confirms), a
+  nearby-issues mini-map once a location is set (anonymized points only),
+  and localStorage draft auto-save/restore.
+- **`/my-complaints`**: every complaint with a live status timeline
+  (Submitted → In progress → Resolved, built from recorded transitions), its
+  Evidence strength meter, and the exact plain-language reasons behind the
+  score.
+- **Civic standing** on `/profile`: points and badges (Voice / Advocate /
+  Champion / Guardian) from the fixed rules in `backend/app/civic.py` —
+  10 pts per complaint, 25 per resolution, published thresholds.
+- **`/guide`** (bilingual step-by-step user guide + FAQ) and **`/about`**
+  (the scoring rulebook published in plain language).
+- Full i18n (English / Hindi, more dictionaries scaffolded), **dark mode**
+  (system-following with manual override, no-flash).
 
 ### MP side (`/dashboard`, `/dashboard/gov-data`, `/onboarding`, `/profile`)
 - **Dashboard**: KPIs, a "Priority evidence" score, a live Google Maps hotspot
   view of complaints, a "Linked issues" panel, themes, and a recent-submissions
   list — each complaint tagged with a **Strong / Moderate / Weak evidence**
-  badge.
+  badge with one-click status/department actions.
+- **"Why this score?"** — clicking any evidence badge opens the stored
+  rule-by-rule breakdown (`verification_reasons`) for that complaint.
+- **Notification bell** — polls `/dashboard/alerts` every minute for new
+  high-confidence (≥ 70) complaints; unseen count survives reloads.
+- **Compare mode** — `/dashboard/compare` puts the last 30 days against the
+  previous 30 (totals, resolutions, per-category deltas — plain subtraction,
+  nothing modeled).
+- **Print report** — a print-CSS view turns the dashboard into an ink-friendly
+  field report straight from the browser; no PDF library.
 - **Verification scoring** (`backend/app/verification.py`): every complaint's
   confidence badge is computed from independent signals only — photo-AI
   confidence, GPS presence, corroborating complaints in the same
@@ -146,6 +169,26 @@ uvicorn app.main:app --reload --port 8000
 The backend needs a local Postgres instance (see `backend/docker-compose.yml`
 for a ready-made one) and a `serviceAccountKey.json` (Firebase service account,
 **never commit this file** — it's gitignored) for Firebase Admin SDK access.
+
+---
+
+## Testing
+
+Both suites run **without a database and without Google Cloud access** by
+design (see [docs/TESTING.md](docs/TESTING.md)):
+
+```bash
+# Frontend — vitest + Testing Library (component + i18n contract tests)
+npm test
+
+# Backend — pytest (pure rule modules + endpoint validation via TestClient)
+cd backend
+venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+venv\Scripts\python.exe -m pytest tests -q
+```
+
+Full endpoint reference in [docs/API.md](docs/API.md); user-facing help in
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md) (also served in-app at `/guide`).
 
 ---
 

@@ -54,11 +54,12 @@ KEYWORD_MAP: dict[str, list[str]] = {
 
 
 def _matches(keyword: str, text_lower: str) -> bool:
-    # Whole-word match for Latin keywords so "supply" doesn't fire on
-    # "supplyChain"-style tokens; plain substring for Devanagari, where
-    # word boundaries (\b) don't apply and agglutination is common.
+    # Whole-word match (plus naive plural: pothole/potholes) for Latin
+    # keywords so "tap" doesn't fire on "tape"; plain substring for
+    # Devanagari, where word boundaries (\b) don't apply and
+    # agglutination is common.
     if re.fullmatch(r"[a-z\s-]+", keyword):
-        return re.search(rf"\b{re.escape(keyword)}\b", text_lower) is not None
+        return re.search(rf"\b{re.escape(keyword)}(?:s|es)?\b", text_lower) is not None
     return keyword in text_lower
 
 

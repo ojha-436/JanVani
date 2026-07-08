@@ -1,9 +1,63 @@
   JanVaani — Session Changes Summary
 
-**Generated:** 2026-07-05
-**Last commit on `main`:** `7310038` — "feat: add FastAPI backend deployed as Firebase Function with Cloud SQL" (2026-07-03)
+**Generated:** 2026-07-05 · **Updated:** 2026-07-08
 
-Everything below is **uncommitted** working-tree state as of now — nothing in this document has been committed to git yet.
+---
+
+## 2026-07-08 session — full build-out (committed in 4 commits)
+
+Everything in this block IS committed. Verified: `next build` green
+(11 routes), `tsc --noEmit` clean, backend pytest 36/36, vitest 12/12.
+
+**Design/system**
+- Dark mode across the whole app: `[data-theme="dark"]` remaps every design
+  token in `globals.css` (previously-hardcoded card/field/header surfaces
+  tokenized); no-flash inline script in `layout.tsx`; theme provider
+  (`src/lib/theme.tsx`) light/dark/system + toggle in both headers.
+- Shared UI kit `src/components/ui/`: StatusBadge, EvidenceMeter,
+  StatusTimeline, Stat, Tabs, Modal, Accordion, EmptyState. Print CSS
+  (`.no-print`/`.print-only`) — `window.print()` is the report export.
+
+**New citizen features**
+- `/my-complaints` (status timeline from recorded transitions + evidence
+  meter + reasons + department + media), `/guide` (bilingual guide + FAQ),
+  `/about` (published scoring rulebook).
+- Submit flow: deterministic category-suggestion chips
+  (`backend/app/classify.py`, en+hi keywords, `source: "keywords"` always),
+  nearby-issues MiniMap (`GET /complaints/nearby`, anonymized), draft
+  auto-save/restore (localStorage).
+- Civic standing card on profile (`backend/app/civic.py`: total×10 +
+  resolved×25; badges 10/100/300/750).
+
+**New MP features**
+- Notification bell (60 s polling of `GET /dashboard/alerts`, unseen count
+  in localStorage), compare mode (`GET /dashboard/compare`, 30d vs previous
+  30d), "Why this score?" modal (stored `verification_reasons`, now also on
+  dashboard payloads), print-report button.
+
+**New backend endpoints** (all deterministic, core rule intact):
+`GET /complaints/mine`, `GET /complaints/nearby`,
+`POST /complaints/suggest-category`, `GET /users/me/stats`,
+`GET /dashboard/compare`, `GET /dashboard/alerts`.
+
+**Testing & docs**
+- Backend: pytest + httpx (`backend/tests/`, `requirements-dev.txt`) — pure
+  rule modules + endpoint validation via TestClient with overrides; no DB
+  needed. Frontend: vitest + Testing Library (`vitest.config.ts`) — i18n
+  translation-contract test + ui component tests; `npm test`.
+- `docs/API.md`, `docs/TESTING.md`, `docs/USER_GUIDE.md`; README updated.
+
+**Still true / unchanged gaps:** the deferred items in section 5 below
+(App Check registration, Token Creator grant, demo-data cleanup, stale
+Cloud SQL IP allowlist) and the pre-existing note that the two 2026-07-08
+migrations (`a1b2c3d4e5f7`, `b2c3d4e5f6a8`) are **not yet applied to the
+live DB** — do not redeploy the backend before running them.
+
+---
+
+*The sections below describe the 2026-07-05 session and are kept for
+history. The "uncommitted" framing below is outdated — that work was
+committed on 2026-07-08.*
 
 ---
 
