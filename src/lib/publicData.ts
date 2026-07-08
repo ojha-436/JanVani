@@ -147,6 +147,32 @@ export function areaCentroid(name: string): { lat: number; lng: number } {
   return AREA_CENTROIDS[name] ?? AREA_CENTROIDS["Nawada town"];
 }
 
+/** Nearest known area to a GPS fix (flat-earth distance — fine at
+ *  constituency scale). Shared by ingest, the submissions API and the
+ *  ranking engine so a GPS-tagged submission resolves to the SAME area
+ *  everywhere. Always returns a known area name. */
+export function nearestArea(coords: { lat: number; lng: number }): string {
+  let best = AREA_NAMES[0];
+  let bestDist = Infinity;
+  for (const [name, c] of Object.entries(AREA_CENTROIDS)) {
+    const dLat = c.lat - coords.lat;
+    const dLng = c.lng - coords.lng;
+    const dist = dLat * dLat + dLng * dLng;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = name;
+    }
+  }
+  return best;
+}
+
+/** Resolve a (possibly unknown/empty) area name to one the demand map can
+ *  plot, defaulting to the constituency centre. Used so submissions with an
+ *  unresolved area still show up on the map instead of being dropped. */
+export function resolveAreaName(name: string): string {
+  return AREA_CENTROIDS[name] ? name : "Nawada town";
+}
+
 const AREA_BY_NAME: Record<string, AreaData> = Object.fromEntries(AREAS.map((a) => [a.name, a]));
 
 /** Look up an area, defaulting to the first (busiest) if unknown. */
@@ -193,6 +219,17 @@ export function beneficiaries(category: Category, a: AreaData): number {
 /** Equity / vulnerability E ∈ [0,1] — see ARCHITECTURE.md §7.4. */
 export function equity(a: AreaData): number {
   return clamp01(0.4 * a.sc_st_pct + 0.3 * a.bpl_pct + 0.3 * (1 - a.literacy_pct));
+}
+
+/** Area with the largest measured service gap for a category — used to
+ *  attribute a submission that named no known area (and had no GPS) to the
+ *  area it most likely means. Shared by the ingest route and the ranking
+ *  engine so a submission's stored area == the work id it's counted under. */
+export function maxDeficitArea(category: Category): string {
+  return AREAS.reduce(
+    (best, a) => (serviceGap(category, a) > serviceGap(category, areaData(best)) ? a.name : best),
+    AREAS[0].name
+  );
 }
 
 /** The single largest measured deficit in an area — used for corroboration

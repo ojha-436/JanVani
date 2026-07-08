@@ -60,10 +60,20 @@ need.
 **MP / office staff (decision-maker)**
 - See a **ranked priority list** with a clear "why this rank" explanation.
 - View a **demand hotspot map** across the constituency.
+- See whether each need is **rising, falling or steady** over time — not just its total.
 - **Compare two competing works** (e.g. school upgrade vs vocational centre) on evidence.
 - **Upload our development plan** so proposed projects are scored against real demand.
+- **Bulk-import** our complaint register (CSV/Excel) so offline complaints rank too.
 - **Adjust weighting** (demand vs gap vs equity) and see ranks recompute transparently.
-- **Drill from a theme to source submissions** to verify the AI.
+- **Drill from a theme to source submissions** to verify the AI — including the citizen's
+  photo and voice note.
+- **Mark a work's response status** (acknowledged → sanctioned → in progress → done) and
+  have it show on a public accountability board.
+- **Ask the dashboard in plain language** ("what's rising in Meskaur?") and act through it,
+  confirming any change before it applies.
+
+**Citizen (accountability)**
+- See on a **public board** how the need I raised has progressed — that I was heard *and* acted on.
 
 ---
 
@@ -81,18 +91,45 @@ need.
 | P0-7 | Public dataset seeded (≥1: e.g. UDISE enrolment or Census population) | used inside the `G`/`P` sub-scores |
 | P0-8 | MP dashboard: ranked list + map + drill-down + Gemini rationale | single screen, end-to-end demo |
 
+### Shipped since v2 (v3.1) — beyond the original P0 core
+| # | Requirement | Acceptance criteria | Status |
+|---|---|---|---|
+| P0-9 | **Momentum**: rising/falling/flat + sparkline per work, from `createdAt` | trend badge + 12-week sparkline on every card | ✅ |
+| P0-10 | **Accountability status** + public board | MP sets status; `/status` shows it to citizens | ✅ |
+| P0-11 | **Media evidence** in detail view | MP plays voice note + sees reference photo | ✅ |
+| P0-12 | **Reference photo in voice flow** | citizen can attach a photo alongside a voice note | ✅ |
+| P0-13 | **Bulk CSV/Excel import** with a downloadable template | uploaded rows rank + map like citizen voices | ✅ |
+| P0-14 | **Gemini dashboard assistant** (grounded, answer-and-confirm) | NL Q&A over live data; proposes actions MP confirms | ✅ |
+| P0-15 | **Auto-recompute** on new submission / bulk import | KPIs, momentum, hotspots update without manual trigger | ✅ |
+| P0-16 | **Citizen account menu + "Your queries"** | full-screen menu (body-portaled) shows profile + each raised query with the MP's action on it | ✅ |
+| P0-17 | **Map plots queries at real GPS** | demand map fits to actual submission coordinates; blank areas resolved from GPS at read time | ✅ |
+| P0-18 | **Consistent area resolution** | ingest, submissions API and ranking engine resolve a blank area the *same* way (nearest-by-GPS → max-deficit), so the drill-down and the ranked work never disagree | ✅ |
+| P0-19 | **Mandatory constituency on submit** | required field (prefilled from profile), stored on the submission for per-constituency routing | ✅ |
+| P0-20 | **MP provisioning** (invite → activate → scoped) | admin console (`/admin/mps`), one-time invite links, constituency bound server-side; dashboard scopes voices by it | ✅ |
+| P0-21 | **Momentum is now scored, not just shown** | Momentum (M) is a 7th weighted, MP-adjustable factor (default 10%), derived from the 30d-vs-prior trend (neutral 0.5 when no trend) | ✅ |
+| P0-22 | **Feasibility & cost estimate agent** | MP-triggered, structured, labelled AI estimate (scope · BoQ · cost band · MPLADS eligibility · confidence) via `gemini-2.5-flash`, cached; fallback when AI off | ✅ |
+| P0-23 | **Official constituency list** | ECI Lok Sabha constituencies (Bihar complete, official numbering) in one dropdown on Raise-your-voice AND admin MP-assignment — free-text removed, so voices route reliably | ✅ |
+| P0-24 | **Bulk MP provisioning + access control** | admin bulk CSV/Excel MP upload with template; deactivate/reactivate revokes access (revoked accounts can't sign in) | ✅ |
+
+> **Ranking weights (v3.2 default):** Demand 25 · Service gap 20 · Population 20 · Equity 15 · Corroboration 5 · Feasibility 5 · **Momentum 10** (was D30/G25/P20/E15/C5/F5 before Momentum was folded in). All remain live-adjustable via the dashboard sliders.
+
+> **Naming:** the MP dashboard's public-board entry is labelled **"Action taken"** (it surfaces the response status on each need), linking to the public `/status` board.
+
+> **Single-constituency scope (known limit):** the seeded public-data + area centroids model one constituency (Nawada, Bihar). A submission with GPS far outside it (e.g. a test from Haryana) now still appears on the map at its true coordinates, but its *area label* resolves to the nearest in-constituency block. Multi-constituency support is P2.
+
 ### Nice-to-Have (P1)
 - SMS/WhatsApp/IVR intake via **Dialogflow** (proves low-connectivity reach).
-- **Head-to-head comparator** view (plan vs citizen work).
-- **Weight sliders** to re-rank live.
-- Gemini **multimodal photo** issue detection feeding category/gap.
+- **Head-to-head comparator** view (plan vs citizen work). ✅ *(shipped)*
+- **Weight sliders** to re-rank live. ✅ *(shipped)*
+- Gemini **multimodal photo** issue detection feeding category/gap. ✅ *(shipped)*
 - Getis-Ord Gi\* significant-hotspot flagging; Bayesian shrinkage for small samples.
 - Admin re-categorisation UI.
 
 ### Future (P2)
 - Aadhaar/OTP verification + anti-gaming safeguards.
 - Live public-data API integrations; Earth Engine satellite gap signals.
-- Citizen feedback loop (notified when their issue drives a funded work).
+- Citizen feedback loop: public status board shipped (v3.1); **per-citizen notification**
+  (FCM/SMS when their issue's status changes) remains future — needs contact capture.
 - Multi-constituency / state rollout, RBAC, public transparency + audit portal.
 - Bias monitoring on ranking outputs.
 

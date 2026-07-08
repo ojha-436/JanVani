@@ -335,3 +335,166 @@ files in the container.
 **CI/CD.** GitHub Actions: `ci.yml` (lint · type-check · build) on every PR;
 `deploy.yml` builds from source and deploys to Cloud Run on merge to `main` via
 Workload Identity Federation. See [DEPLOY.md](DEPLOY.md).
+
+---
+
+## 12. Momentum — demand over time (v3.1)
+
+The dashboard was a photograph; momentum makes it a movie. Every submission
+already carries `createdAt`, so no new capture is needed — the ranking engine
+buckets each theme's timestamps into a **12-week volume sparkline** and a
+**recent-30d-vs-prior-30d** change (`src/lib/ranking.ts` → `computeTrend`).
+
+- **Signal.** `trend = { direction: rising|falling|flat, changePct, spark[] }`
+  attached to every `Work`. `rising` iff recent > prior and `changePct ≥ 20%`;
+  `falling` iff the mirror. This distinguishes a **political emergency** (a need
+  accelerating) from a **budget line** (a flat chronic one) — the single most
+  decision-relevant fact, computed for free from data we already store.
+- **Surface.** Each ranked work card shows the sparkline + a signed-% badge
+  (`src/components/Momentum.tsx`); the sample snapshot (`dashboardData.ts`)
+  carries hand-tuned trends so the demo reads well with or without live volume.
+- **Scale path.** In the BigQuery target this is a windowed `COUNT(*) OVER` on
+  the `fact_submission` table — the in-process version computes the identical shape.
+
+## 13. Accountability loop — status + public board (v3.1)
+
+Demand without response is a one-way mirror. Works now carry a **response
+status** the MP sets and citizens can see.
+
+- **Model.** `workStatus/{workId}` in Firestore, keyed by the *stable* work id
+  so status survives every ranking recompute. Values:
+  `new → acknowledged → sanctioned → in_progress → completed`.
+- **APIs.** `GET /api/status` joins `rankings/latest` with `workStatus` into a
+  full board; `POST /api/status { workId, status, note? }` sets one (MP action,
+  also the sink for the assistant's confirmed actions). Server-mediated like
+  everything else; validated against the status enum.
+- **MP side.** A status selector on each work card (`dashboard/page.tsx`),
+  optimistic update + persist.
+- **Citizen side.** A public, no-login board at **`/status`** ("You spoke. We
+  acted.") showing each need's progression. This closes the loop the brief asked
+  for without a per-citizen notification channel (most submissions are anonymous;
+  FCM is future work). Notifications remain the P2 upgrade.
+
+## 14. Media evidence (v3.1)
+
+Voice submissions can now carry a **reference photo**, and the MP can play the
+voice note and view the photo from the submission detail. Media stays in the
+private bucket; `GET /api/media/{id}?kind=audio|photo` streams it server-side
+(client Storage stays deny-all). The submissions API exposes `photoUrl`/`audioUrl`
+pointers only when media exists.
+
+## 15. Bulk ingestion (v3.1)
+
+MP offices hold complaint registers outside the app. `GET /api/bulk?template=csv|xlsx`
+serves the expected format; `POST /api/bulk` (multipart) parses a CSV/XLSX
+(quote-aware CSV parser; `exceljs` for XLSX), normalises each row into the same
+`submissions` shape (`channel: "bulk"`), area-resolves from name/GPS, writes in
+≤400-doc Firestore batches, then triggers a recompute — so bulk rows rank, map
+and drill down exactly like citizen voices. Capped at 1,000 rows/file.
+
+## 16. Gemini dashboard assistant (v3.1)
+
+A chat embedded in the MP dashboard (`src/components/AssistantChat.tsx` →
+`POST /api/assistant`). Every answer is **grounded server-side** in the live
+ranked works + momentum + status (never free-floating): the route builds a
+compact JSON context and calls Gemini (`askAssistant` in `ai.ts`, forced-JSON).
+
+- **Answer-and-confirm, never a silent write.** When the MP asks to change a
+  status the model returns a structured `action`; the UI renders a **Confirm**
+  button and only then calls `POST /api/status`. An AI misread can't mutate data
+  on its own — the security posture the design requires.
+- **Always answers.** If Vertex AI is off or errors, a deterministic rule-based
+  fallback (`ruleFallback`) handles momentum / area / status / priority intents,
+  so the assistant works in demo mode too.
+
+**Recompute is now auto-triggered.** Both `POST /api/submissions` and
+`POST /api/bulk` call the shared `recomputeAndStore` (`src/lib/recompute.ts`,
+rationale-free fast path) after writing, so KPIs, momentum, hotspots and the
+ranked list update immediately — the periodic full recompute (`/api/recompute`,
+with Gemini rationale) still runs for the richer "why this rank" prose.
+
+## 17. MP provisioning & constituency scoping (v3.2)
+
+MPs are **provisioned, never password-shared**. An `mpAccounts/{token}`
+Firestore record binds one MP (by email) to exactly one constituency:
+`{ email, name, constituency, status: invited|active, inviteToken }`.
+
+**Flow**
+```
+Admin (/admin/mps, admin-key gated)
+  └─ POST /api/mp  → creates mpAccounts record + one-time invite link
+MP opens /mp-activate?token=…
+  └─ GET  /api/mp/resolve?token=  → previews the allocation (constituency)
+  └─ POST /api/mp/resolve {token}  → marks active; session bound to constituency
+Returning MP → Google sign-in
+  └─ GET  /api/mp/resolve?email=  → resolves their constituency (can't self-pick)
+Dashboard → GET /api/submissions?constituency=<bound>  → scoped citizen voices
+```
+
+- **The MP never chooses their constituency** — it comes from the admin's
+  allocation, resolved server-side by email/token.
+- **Scoping today:** the citizen-voice feed (map, drill-down, "voices") filters
+  by the bound constituency; rows saved before constituency capture count as the
+  seeded default so the pilot MP still sees existing data.
+- **Admin gate:** a single server-side `MP_ADMIN_KEY` env (pilot-grade). Set it
+  on Cloud Run; the code default is for local/demo only.
+
+> **Two honest limits, both flagged in-product:**
+> 1. **Enforcement.** Auth is still the localStorage session, so scoping is
+>    *functional*, not yet *tamper-proof*. Production wires real Firebase Auth:
+>    the constituency becomes a **custom claim** on the verified ID token, and
+>    the API + Firestore rules enforce `where constituency == token.claim`. The
+>    `mpAccounts` table built here is exactly the allocation source that step reads.
+> 2. **Per-constituency ranking.** The 6-factor objective layer (§4, §7) is
+>    seeded for one constituency (Nawada). A newly-provisioned constituency shows
+>    its citizen voices; a full ranking needs that constituency's public datasets
+>    (Census/UDISE/CGWB/…) loaded as its own snapshot.
+
+## 18. Feasibility & cost estimate agent (v3.3)
+
+An MP-triggered agent that turns a citizen voice into a rough, structured
+feasibility + cost estimate for **early prioritisation — not a quotation**.
+
+**Flow:** MP opens a voice → clicks *Estimate feasibility & cost* →
+`POST /api/estimate` → `estimateFeasibility()` (`gemini-2.5-flash`) returns
+structured JSON: `{ scope, eligibility{mplads,note}, boq[], costLow, costHigh,
+timelineWeeks, risks[], assumptions[], confidence, source }`. Rendered in the
+submission detail with a cost band, bill of quantities, MPLADS-eligibility badge,
+risks, and a prominent *"AI estimate — verify before sanctioning"* disclaimer.
+
+- **Honest by construction.** The prompt is grounded in typical Indian
+  Schedule-of-Rates ranges (per category, `src/lib/estimate.ts` → `categoryBand`),
+  outputs assumptions + a confidence band, and validates/clamps the numbers.
+  When Vertex AI is off or the call fails, a deterministic **category-band
+  fallback** produces a labelled `source: "fallback"` estimate so the button
+  always works.
+- **Cached** per submission in `estimates/{id}` (Firestore) so re-opening a voice
+  doesn't re-bill Gemini; `refresh:true` recomputes.
+- **Roadmap:** V2 grounds the bill of quantities against a real **state PWD
+  Schedule of Rates**; V3 lets the MP *accept* an estimate to set that work's
+  **Feasibility (F)** factor — replacing today's per-category constant with
+  evidence, and enabling a cost-effectiveness (impact-per-rupee) term.
+
+## 19. Official constituencies, bulk MP provisioning & access control (v3.4)
+
+**Single official constituency list.** `src/lib/constituencies.ts` holds **all
+543** ECI Lok Sabha parliamentary constituencies across every state/UT (with
+Telangana split from Andhra Pradesh and Ladakh from J&K so state grouping is
+current), grouped by state in the dropdowns. Both the citizen Raise-your-
+voice page and the admin MP-assignment use the SAME dropdown, so a voice's
+constituency is guaranteed to match an MP's assigned constituency (no more
+free-text mismatch — the earlier root cause of mis-routed voices). The API
+validates/normalises every constituency against this list (`resolveConstituency`).
+
+**Bulk MP provisioning.** `GET /api/mp/bulk?template=csv|xlsx` serves a template
+(columns: email · name · constituency); `POST /api/mp/bulk` (admin-gated,
+multipart) validates each row's constituency against the official list, creates/
+updates one allocation per row (re-uploading an email reuses its token), and
+returns each row's invite link or a per-row error. Mirrors the complaint bulk
+upload.
+
+**Access control.** MP allocations carry `status: invited | active | revoked`.
+The admin console can **deactivate** (→ `revoked`) or **reactivate** any account
+(`PATCH /api/mp`). A revoked account is rejected by `/api/mp/resolve` (403) at
+both activation and returning sign-in, so it immediately loses the ability to
+bind a constituency and reach a dashboard.

@@ -30,10 +30,11 @@ export type Profile = {
 };
 
 export type Session = {
-  method: "phone" | "google";
+  method: "phone" | "google" | "invite";
   role: "citizen" | "mp";
   phone?: string;
   email?: string;
+  constituency?: string; // MP's allocated constituency (bound at activation/sign-in)
   at: string;
 };
 

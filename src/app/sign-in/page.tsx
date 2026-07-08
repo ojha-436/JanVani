@@ -76,17 +76,42 @@ export default function SignInPage() {
     }
   }
 
+  // For an MP, the constituency is NOT chosen here — it's resolved from the
+  // admin's allocation for that email (mpAccounts). Citizens get none.
+  async function mpConstituency(email?: string): Promise<string | undefined> {
+    if (role !== "mp" || !email) return undefined;
+    try {
+      const r = await fetch(`/api/mp/resolve?email=${encodeURIComponent(email)}`);
+      const d = await r.json();
+      return d.ok ? (d.constituency as string) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function google() {
     setNotice(null);
     if (demo) {
-      finish({ method: "google", role, email: role === "mp" ? "mp.office@gmail.com" : "citizen@gmail.com" });
+      const email = role === "mp" ? "mp.office@gmail.com" : "citizen@gmail.com";
+      const constituency = await mpConstituency(email);
+      if (role === "mp" && !constituency) {
+        setNotice("This email isn't allocated to a constituency yet. Ask your admin for an invite link.");
+        return;
+      }
+      finish({ method: "google", role, email, constituency });
       return;
     }
     setBusy(true);
     try {
       const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
       const res = await signInWithPopup(auth!, new GoogleAuthProvider());
-      finish({ method: "google", role, email: res.user.email ?? undefined });
+      const email = res.user.email ?? undefined;
+      const constituency = await mpConstituency(email);
+      if (role === "mp" && !constituency) {
+        setNotice("This email isn't allocated to a constituency yet. Ask your admin for an invite link.");
+        return;
+      }
+      finish({ method: "google", role, email, constituency });
     } catch (e) {
       setNotice(errMessage(e));
     } finally {

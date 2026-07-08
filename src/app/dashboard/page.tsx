@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DemandMap } from "@/components/DemandMap";
 import { SubmissionDetail } from "@/components/SubmissionDetail";
+import { BulkUpload } from "@/components/BulkUpload";
+import { TrendBadge } from "@/components/Momentum";
+import { AssistantChat } from "@/components/AssistantChat";
 import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/profile";
 import { CATEGORY_COLOR, type PublicSubmission } from "@/lib/sampleData";
@@ -15,7 +18,8 @@ import {
   DEFAULT_WEIGHTS,
   FACTOR_COLORS,
   FACTOR_ORDER,
-  THEMES,
+  STATUS_META,
+  WORK_STATUSES,
   WORKS,
   confidence,
   scoreWork,
@@ -24,6 +28,7 @@ import {
   type Theme,
   type Weights,
   type Work,
+  type WorkStatusValue,
 } from "@/lib/dashboardData";
 
 /** Live ranking snapshot as returned by GET /api/rankings. */
@@ -39,7 +44,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 export default function DashboardPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const { signOut } = useSession();
+  const { signOut, session } = useSession();
+  const scope = session?.constituency; // MP's allocated constituency, if any
   const [weights, setWeights] = useState<Weights>({ ...DEFAULT_WEIGHTS });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
@@ -50,18 +56,51 @@ export default function DashboardPage() {
   const [detail, setDetail] = useState<PublicSubmission | null>(null);
   const [openCat, setOpenCat] = useState<string | null>(null);
 
-  useEffect(() => {
-    let on = true;
-    fetch("/api/submissions")
+  // Accountability status per work id (merged into the ranked list).
+  const [statusMap, setStatusMap] = useState<Record<string, WorkStatusValue>>({});
+
+  // Load (and reload, e.g. after a bulk import or status change) the live feeds.
+  const refresh = useCallback(() => {
+    const subsUrl = scope ? `/api/submissions?constituency=${encodeURIComponent(scope)}` : "/api/submissions";
+    fetch(subsUrl)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (on && Array.isArray(d?.submissions)) setSubs(d.submissions);
+        if (Array.isArray(d?.submissions)) setSubs(d.submissions);
       })
       .catch(() => {});
-    return () => {
-      on = false;
-    };
+    fetch("/api/rankings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.source === "live" && Array.isArray(d.works) && d.works.length) {
+          setLive({ works: d.works, hotspots: d.hotspots ?? [], themes: d.themes ?? [], constituency: d.constituency ?? CONSTITUENCY });
+        }
+      })
+      .catch(() => {});
+    fetch("/api/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (Array.isArray(d?.items)) {
+          const m: Record<string, WorkStatusValue> = {};
+          for (const it of d.items) m[it.id] = it.status;
+          setStatusMap(m);
+        }
+      })
+      .catch(() => {});
+  }, [scope]);
+
+  // Set a work's accountability status (optimistic; persists via /api/status).
+  const setWorkStatus = useCallback((workId: string, workTitle: string, status: WorkStatusValue) => {
+    setStatusMap((m) => ({ ...m, [workId]: status }));
+    fetch("/api/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workId, workTitle, status }),
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   // Submissions grouped by category, most-recent first (for the drill-down).
   const byCat = useMemo(() => {
@@ -78,27 +117,35 @@ export default function DashboardPage() {
     router.push("/");
   }
 
-  // Pull the latest computed ranking; fall back to the built-in sample
-  // snapshot so the dashboard is never blank (e.g. demo mode / no data yet).
-  useEffect(() => {
-    let on = true;
-    fetch("/api/rankings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (on && d?.source === "live" && Array.isArray(d.works) && d.works.length) {
-          setLive({ works: d.works, hotspots: d.hotspots ?? [], themes: d.themes ?? [], constituency: d.constituency ?? CONSTITUENCY });
-        }
-      })
-      .catch(() => {});
-    return () => {
-      on = false;
-    };
-  }, []);
-
   const works = live?.works ?? WORKS;
-  const themes = live?.themes ?? THEMES;
   const constituency = live?.constituency ?? CONSTITUENCY;
   const isLive = live !== null;
+
+  // Recurring needs derive from the SAME (constituency-scoped) submissions feed
+  // as the drill-down — so a category's count always matches the voices behind
+  // it. Previously the count came from the global ranking while the list was
+  // scoped, which could show "4" with an empty drill-down.
+  const themes = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of subs) m.set(s.category, (m.get(s.category) ?? 0) + 1);
+    return [...m.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, count]) => ({ category, count, tone: CATEGORY_COLOR[category] ?? "var(--color-marigold)" }));
+  }, [subs]);
+
+  // KPIs also reflect the scoped feed, so the headline numbers match the map,
+  // the drill-down and the voices this MP can actually see.
+  const kpiStats = useMemo(() => {
+    const cats = new Set<string>();
+    const areas = new Set<string>();
+    let verified = 0;
+    for (const s of subs) {
+      cats.add(s.category);
+      if (s.area) areas.add(s.area);
+      if (s.verified) verified++;
+    }
+    return { voices: subs.length, needs: cats.size, areas: areas.size, verifiedPct: subs.length ? Math.round((verified / subs.length) * 100) : 0 };
+  }, [subs]);
 
   const ranked = useMemo(
     () =>
@@ -119,10 +166,10 @@ export default function DashboardPage() {
     .filter((w): w is Work => Boolean(w));
 
   const kpis = [
-    { v: fmt(constituency.voices), l: t.dash.kpiVoices },
-    { v: fmt(constituency.themes), l: t.dash.kpiThemes },
-    { v: fmt(constituency.areas), l: t.dash.kpiAreas },
-    { v: `${constituency.verifiedPct}%`, l: t.dash.kpiVerified },
+    { v: fmt(kpiStats.voices), l: t.dash.kpiVoices },
+    { v: fmt(kpiStats.needs), l: t.dash.kpiThemes },
+    { v: fmt(kpiStats.areas), l: t.dash.kpiAreas },
+    { v: `${kpiStats.verifiedPct}%`, l: t.dash.kpiVerified },
   ];
 
   return (
@@ -140,7 +187,7 @@ export default function DashboardPage() {
                 {t.dash.badge}
               </p>
               <p className="text-sm font-semibold leading-tight">
-                {constituency.name}, {constituency.state}
+                {scope ? scope : `${constituency.name}, ${constituency.state}`}
               </p>
             </div>
           </div>
@@ -157,9 +204,13 @@ export default function DashboardPage() {
               {isLive ? "Live data" : "Sample data"}
             </span>
             <LanguageSwitcher />
-            <span className="hidden rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold sm:inline-block">
-              {t.dash.office}
-            </span>
+            <Link
+              href="/status"
+              className="hidden rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold transition-colors hover:border-[var(--color-sage)] hover:text-[var(--color-sage)] sm:inline-block"
+              title="Public record of action taken on citizen needs"
+            >
+              Action taken
+            </Link>
             <button
               onClick={handleSignOut}
               className="flex items-center gap-1.5 rounded-full border border-[var(--color-line)] px-3 py-1.5 text-sm font-semibold transition-colors hover:border-[var(--color-terracotta)] hover:text-[var(--color-terracotta)]"
@@ -173,6 +224,13 @@ export default function DashboardPage() {
       </header>
 
       <main id="main" className="mx-auto max-w-6xl px-5 py-8">
+        {scope && scope !== CONSTITUENCY.name && (
+          <div className="mb-6 rounded-xl border border-[var(--color-marigold)] bg-[rgba(227,154,28,0.1)] px-4 py-3 text-sm">
+            Showing <strong>{scope}</strong>&apos;s citizen voices on the map and drill-down. The priority ranking &amp; KPIs below use the
+            public-data model currently seeded for <strong>{CONSTITUENCY.name}</strong> — loading {scope}&apos;s datasets is the next step.
+          </div>
+        )}
+
         {/* ---- KPI row ---- */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {kpis.map((k) => (
@@ -216,6 +274,8 @@ export default function DashboardPage() {
                   onToggle={() => setExpanded((e) => (e === w.id ? null : w.id))}
                   inCompare={compare.includes(w.id)}
                   onCompare={() => toggleCompare(w.id)}
+                  status={statusMap[w.id] ?? w.status ?? "new"}
+                  onSetStatus={(st) => setWorkStatus(w.id, w.title, st)}
                 />
               ))}
             </ol>
@@ -349,9 +409,15 @@ export default function DashboardPage() {
             })}
           </div>
         </section>
+
+        {/* ---- bulk data upload ---- */}
+        <BulkUpload onImported={refresh} />
       </main>
 
       <SubmissionDetail submission={detail} onClose={() => setDetail(null)} />
+
+      {/* ---- Gemini dashboard assistant ---- */}
+      <AssistantChat isLive={isLive} onActionApplied={refresh} />
     </div>
   );
 }
@@ -377,6 +443,8 @@ function WorkCard({
   onToggle,
   inCompare,
   onCompare,
+  status,
+  onSetStatus,
 }: {
   work: Work;
   score: number;
@@ -386,11 +454,14 @@ function WorkCard({
   onToggle: () => void;
   inCompare: boolean;
   onCompare: () => void;
+  status: WorkStatusValue;
+  onSetStatus: (status: WorkStatusValue) => void;
 }) {
   const { t } = useI18n();
   const wsum = FACTOR_ORDER.reduce((a, k) => a + weights[k], 0) || 1;
   const conf = confidence(work.factors);
   const confColor = conf === "high" ? "var(--color-sage)" : conf === "medium" ? "var(--color-marigold-deep)" : "var(--color-terracotta)";
+  const statusColor = STATUS_META[status].color;
 
   return (
     <li className="card overflow-hidden">
@@ -411,6 +482,11 @@ function WorkCard({
                 {work.category} · {work.area} ·{" "}
                 <span className="font-medium">{fmt(work.demand)} {t.dash.citizens}</span>
               </p>
+              {work.trend && (
+                <div className="mt-2">
+                  <TrendBadge trend={work.trend} showSpark />
+                </div>
+              )}
             </div>
             <div className="text-right">
               <div className="font-display text-3xl leading-none" style={{ fontWeight: 560 }}>
@@ -454,6 +530,29 @@ function WorkCard({
                 {open ? "▲" : `${t.dash.whyTitle}  ▾`}
               </button>
             </div>
+          </div>
+
+          {/* accountability status control */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--color-paper-deep)] px-2.5 py-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: statusColor }}>
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: statusColor }} />
+              {STATUS_META[status].label}
+            </span>
+            <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--color-ink-soft)]">
+              Set status
+              <select
+                value={status}
+                onChange={(e) => onSetStatus(e.target.value as WorkStatusValue)}
+                className="rounded-md border border-[var(--color-line)] bg-[var(--color-paper)] px-2 py-1 text-xs font-semibold"
+                aria-label={`Set status for ${work.title}`}
+              >
+                {WORK_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_META[s].label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {/* drill-down */}

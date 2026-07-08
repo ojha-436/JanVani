@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createHash, randomUUID } from "crypto";
 import { getBucket, getDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { describePhoto, extractNeed, geocodeToArea, transcribeAudio } from "@/lib/ai";
-import { areaCentroid } from "@/lib/publicData";
+import { areaCentroid, CONSTITUENCY_META, maxDeficitArea, nearestArea, type Category } from "@/lib/publicData";
+import { recomputeAndStore } from "@/lib/recompute";
 import { sampleSubmissions, type PublicSubmission } from "@/lib/sampleData";
 
 /* ------------------------------------------------------------------
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
     const text = String(form.get("text") ?? "").trim();
     const locale = String(form.get("locale") ?? "en");
     const categoryHint = String(form.get("category") ?? "").trim();
+    const constituency = String(form.get("constituency") ?? "").trim();
     const location = String(form.get("location") ?? "").trim();
     const coords = form.get("coords") ? safeParse(String(form.get("coords"))) : null;
     const anonymous = form.get("anonymous") !== "false"; // default anonymous
@@ -78,7 +80,10 @@ export async function POST(req: Request) {
     const extraction = await extractNeed({ text: primaryText, locale, photoDescription, categoryHint });
 
     // ---- 5. geocode → area ----
-    const area = extraction.areaHint || geocodeToArea(location, coords);
+    // Name match → nearest-centroid (if GPS) → max-deficit area for the
+    // category. Never "" so the stored area matches the work id the ranking
+    // engine assigns (which is what "Your queries" looks the MP's action up by).
+    const area = extraction.areaHint || geocodeToArea(location, coords) || maxDeficitArea(extraction.category as Category);
 
     // ---- 6. build the normalised fact row ----
     const identity = anonymous ? null : `${verifiedName}|${aadhaarLast4}`.trim().replace(/^\|+|\|+$/g, "") || null;
@@ -94,6 +99,7 @@ export async function POST(req: Request) {
       urgency: extraction.urgency,
       entities: extraction.entities,
       area,
+      constituency: constituency || null,
       rawTextPresent: Boolean(text),
       hasAudio: audioBuf.length > 0,
       hasPhoto: photoBuf.length > 0,
@@ -115,6 +121,20 @@ export async function POST(req: Request) {
         stored = true;
       } catch (e) {
         console.warn("[submissions] Firestore write failed:", (e as Error).message);
+      }
+    }
+
+    // ---- 8. refresh the dashboard's ranking snapshot (non-fatal) ----
+    // Keeps the KPI count / hotspot map / recurring-needs list in step with
+    // every new voice as it lands, instead of only updating on the next
+    // manual/scheduled POST /api/recompute. No Gemini calls here — cheap and
+    // synchronous so the citizen's submit response isn't delayed by much;
+    // the periodic full recompute fills in the AI "why this rank" prose.
+    if (stored && db) {
+      try {
+        await recomputeAndStore(db, { withRationale: false });
+      } catch (e) {
+        console.warn("[submissions] auto-recompute failed:", (e as Error).message);
       }
     }
 
@@ -145,7 +165,7 @@ export async function POST(req: Request) {
    name). Demo: a deterministic realistic sample so the map and
    recurring-needs drill-down are fully interactive without a database.
    ------------------------------------------------------------------ */
-export async function GET() {
+export async function GET(req: Request) {
   const db = getDb();
   if (!db) {
     return NextResponse.json({ source: "sample", submissions: sampleSubmissions() });
@@ -154,17 +174,33 @@ export async function GET() {
     const snap = await db.collection("submissions").orderBy("createdAt", "desc").limit(500).get();
     if (snap.empty) return NextResponse.json({ source: "sample", submissions: sampleSubmissions() });
 
-    const submissions: PublicSubmission[] = snap.docs.map((d) => {
+    // Constituency scope: an MP sees only their constituency's voices. Rows
+    // saved before constituency capture (no field) count as the seeded
+    // default constituency, so the pilot MP still sees existing data.
+    const scope = new URL(req.url).searchParams.get("constituency");
+    const docs = scope
+      ? snap.docs.filter((d) => String(d.data().constituency || CONSTITUENCY_META.name) === scope)
+      : snap.docs;
+
+    const submissions: PublicSubmission[] = docs.map((d) => {
       const x = d.data();
-      const area = String(x.area ?? "");
+      const rawArea = String(x.area ?? "");
+      const category = String(x.category ?? "Other");
       const anonymous = Boolean(x.anonymous ?? true);
-      const coords =
+      const realCoords =
         x.coords && typeof x.coords.lat === "number" && typeof x.coords.lng === "number"
           ? { lat: x.coords.lat, lng: x.coords.lng }
-          : jitterCoords(area, d.id);
+          : null;
+      // Resolve a display area for rows saved before geo-resolution — the SAME
+      // rule the ranking engine uses (nearest by GPS, else max-deficit for the
+      // category) so the map/drill-down and the ranked work never disagree.
+      const area = rawArea || (realCoords ? nearestArea(realCoords) : maxDeficitArea(category as Category));
+      // Keep the citizen's actual GPS when present so the map shows the query
+      // at its true location; only synthesise coords when none were captured.
+      const coords = realCoords ?? jitterCoords(area, d.id);
       return {
         id: d.id,
-        category: String(x.category ?? "Other"),
+        category,
         area,
         need_en: String(x.need_en ?? ""),
         coords,
@@ -177,6 +213,8 @@ export async function GET() {
         hasPhoto: Boolean(x.hasPhoto),
         hasAudio: Boolean(x.hasAudio),
         location: String(x.location ?? area),
+        photoUrl: x.media?.photo ? `/api/media/${d.id}?kind=photo` : undefined,
+        audioUrl: x.media?.audio ? `/api/media/${d.id}?kind=audio` : undefined,
       };
     });
     return NextResponse.json({ source: "live", submissions });

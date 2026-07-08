@@ -8,11 +8,11 @@
    dashboard is fully interactive for the demo.
    ------------------------------------------------------------------ */
 
-export type FactorKey = "D" | "G" | "P" | "E" | "C" | "F";
+export type FactorKey = "D" | "G" | "P" | "E" | "C" | "F" | "M";
 export type Factors = Record<FactorKey, number>; // each 0..1
 export type Weights = Record<FactorKey, number>; // slider "points"; normalised at score time
 
-export const FACTOR_ORDER: FactorKey[] = ["D", "G", "P", "E", "C", "F"];
+export const FACTOR_ORDER: FactorKey[] = ["D", "G", "P", "E", "C", "F", "M"];
 
 export const FACTOR_COLORS: Record<FactorKey, string> = {
   D: "var(--color-marigold)",
@@ -21,10 +21,12 @@ export const FACTOR_COLORS: Record<FactorKey, string> = {
   E: "var(--color-sage)",
   C: "#8a5a44",
   F: "#5b7b8c",
+  M: "#7d5ba6",
 };
 
-// Default weights (points, sum 100) — matches the PRD default blend.
-export const DEFAULT_WEIGHTS: Weights = { D: 30, G: 25, P: 20, E: 15, C: 5, F: 5 };
+// Default weights (points, sum 100). Momentum (M) makes a rising need count
+// in the score, not just as decoration — funded by trimming Demand/Gap.
+export const DEFAULT_WEIGHTS: Weights = { D: 25, G: 20, P: 20, E: 15, C: 5, F: 5, M: 10 };
 
 export const CONSTITUENCY = {
   name: "Nawada",
@@ -35,6 +37,45 @@ export const CONSTITUENCY = {
   areas: 310,
   verifiedPct: 61,
 };
+
+/* ---------------- momentum (trend over time) ---------------- */
+
+export type TrendDirection = "rising" | "falling" | "flat";
+
+/** Momentum for a work/theme, derived from submission timestamps. */
+export type Trend = {
+  direction: TrendDirection;
+  changePct: number; // signed % change: recent 30d window vs the prior 30d
+  spark: number[]; // volume per weekly bucket, oldest → newest
+};
+
+/* ---------------- accountability status ---------------- */
+
+export const WORK_STATUSES = ["new", "acknowledged", "sanctioned", "in_progress", "completed"] as const;
+export type WorkStatusValue = (typeof WORK_STATUSES)[number];
+
+/** Status record as stored in Firestore `workStatus/{workId}`. */
+export type WorkStatus = {
+  status: WorkStatusValue;
+  note?: string;
+  updatedAt?: string;
+  workTitle?: string;
+};
+
+/** Display metadata per status — MP-facing label, colour, and the phrasing
+ *  citizens see on the public "you spoke, we acted" board. */
+export const STATUS_META: Record<WorkStatusValue, { label: string; citizenLabel: string; color: string }> = {
+  new: { label: "New", citizenLabel: "Received", color: "var(--color-ink-soft)" },
+  acknowledged: { label: "Acknowledged", citizenLabel: "Acknowledged by MP", color: "var(--color-indigo)" },
+  sanctioned: { label: "Funds sanctioned", citizenLabel: "Funds sanctioned", color: "var(--color-marigold-deep)" },
+  in_progress: { label: "In progress", citizenLabel: "Work in progress", color: "var(--color-terracotta)" },
+  completed: { label: "Completed", citizenLabel: "Completed", color: "var(--color-sage)" },
+};
+
+/* ---------------- Gemini assistant contract ---------------- */
+
+export type AssistantAction = { type: "setStatus"; workId: string; workTitle: string; status: WorkStatusValue };
+export type AssistantResponse = { reply: string; action?: AssistantAction };
 
 export type Work = {
   id: string;
@@ -47,6 +88,8 @@ export type Work = {
   evidence: string[];
   rationale: string;
   quotes: string[];
+  trend?: Trend; // momentum, when timestamps are available
+  status?: WorkStatusValue; // accountability status, merged from workStatus
 };
 
 export const WORKS: Work[] = [
@@ -57,7 +100,7 @@ export const WORKS: Work[] = [
     area: "Akbarpur",
     source: "citizen",
     demand: 412,
-    factors: { D: 0.9, G: 0.88, P: 0.7, E: 0.82, C: 0.9, F: 0.6 },
+    factors: { D: 0.9, G: 0.88, P: 0.7, E: 0.82, C: 0.9, F: 0.6, M: 0.74 },
     evidence: [
       "412 unique citizens in the last 90 days",
       "Nearest senior-secondary school 6.2 km away (UDISE)",
@@ -70,6 +113,7 @@ export const WORKS: Work[] = [
       "Our daughters stop studying after class 8 — the nearest school is too far.",
       "The building has no rooms for higher classes; children sit outside.",
     ],
+    trend: { direction: "rising", changePct: 48, spark: [12, 15, 14, 18, 20, 19, 24, 28, 26, 33, 38, 44] },
   },
   {
     id: "w-road-rajauli",
@@ -78,7 +122,7 @@ export const WORKS: Work[] = [
     area: "Rajauli",
     source: "citizen",
     demand: 507,
-    factors: { D: 0.96, G: 0.8, P: 0.85, E: 0.6, C: 0.85, F: 0.55 },
+    factors: { D: 0.96, G: 0.8, P: 0.85, E: 0.6, C: 0.85, F: 0.55, M: 0.86 },
     evidence: [
       "507 unique citizens; the single most-raised need",
       "Road floods 4 months/year (IMD rainfall + drainage gap)",
@@ -91,6 +135,7 @@ export const WORKS: Work[] = [
       "In the rains an ambulance simply cannot get through.",
       "We lose a full day's wages going the long way around.",
     ],
+    trend: { direction: "rising", changePct: 72, spark: [20, 22, 19, 24, 28, 30, 35, 40, 48, 52, 60, 72] },
   },
   {
     id: "w-water-meskaur",
@@ -99,7 +144,7 @@ export const WORKS: Work[] = [
     area: "Meskaur",
     source: "citizen",
     demand: 356,
-    factors: { D: 0.84, G: 0.9, P: 0.72, E: 0.78, C: 0.8, F: 0.5 },
+    factors: { D: 0.84, G: 0.9, P: 0.72, E: 0.78, C: 0.8, F: 0.5, M: 0.7 },
     evidence: [
       "356 unique citizens",
       "Tap coverage 22%; groundwater over-exploited (CGWB)",
@@ -112,6 +157,7 @@ export const WORKS: Work[] = [
       "We wait hours at the one working handpump.",
       "The borewell has run dry three summers in a row.",
     ],
+    trend: { direction: "rising", changePct: 40, spark: [15, 17, 16, 20, 22, 21, 25, 28, 30, 33, 36, 42] },
   },
   {
     id: "w-health-kauakol",
@@ -120,7 +166,7 @@ export const WORKS: Work[] = [
     area: "Kauakol",
     source: "citizen",
     demand: 243,
-    factors: { D: 0.7, G: 0.75, P: 0.6, E: 0.7, C: 0.7, F: 0.6 },
+    factors: { D: 0.7, G: 0.75, P: 0.6, E: 0.7, C: 0.7, F: 0.6, M: 0.53 },
     evidence: [
       "243 unique citizens",
       "Nearest PHC 11 km away (facility data)",
@@ -130,6 +176,7 @@ export const WORKS: Work[] = [
     rationale:
       "243 citizens want a sub-centre in Kauakol, where the nearest PHC is 11 km away. NFHS shows immunisation lagging the district average, corroborating the demand with a measurable health gap.",
     quotes: ["Pregnant women travel 11 km for a check-up.", "By the time we reach the PHC, it's often closed."],
+    trend: { direction: "flat", changePct: 5, spark: [18, 20, 17, 19, 21, 18, 20, 19, 22, 20, 21, 19] },
   },
   {
     id: "w-flood-sakri",
@@ -138,7 +185,7 @@ export const WORKS: Work[] = [
     area: "Warisaliganj",
     source: "citizen",
     demand: 198,
-    factors: { D: 0.6, G: 0.82, P: 0.65, E: 0.55, C: 0.75, F: 0.4 },
+    factors: { D: 0.6, G: 0.82, P: 0.65, E: 0.55, C: 0.75, F: 0.4, M: 1 },
     evidence: [
       "198 unique citizens (seasonal spikes)",
       "Recurrent crop loss; IMD flags high flood risk",
@@ -147,6 +194,7 @@ export const WORKS: Work[] = [
     rationale:
       "Seasonal but severe: 198 citizens report the Sakri river flooding farmland and homes. IMD flood-risk data corroborates the need, though feasibility is lower given the engineering cost.",
     quotes: ["Every monsoon we lose the standing crop.", "Water enters homes in the low-lying tola."],
+    trend: { direction: "rising", changePct: 120, spark: [4, 3, 5, 6, 8, 10, 14, 18, 22, 30, 38, 44] },
   },
   {
     id: "w-anganwadi-hisua",
@@ -155,7 +203,7 @@ export const WORKS: Work[] = [
     area: "Hisua",
     source: "plan",
     demand: 121,
-    factors: { D: 0.55, G: 0.6, P: 0.6, E: 0.65, C: 0.6, F: 0.7 },
+    factors: { D: 0.55, G: 0.6, P: 0.6, E: 0.65, C: 0.6, F: 0.7, M: 0.46 },
     evidence: [
       "121 unique citizens + proposed in dev. plan",
       "Child malnutrition above district average (NFHS)",
@@ -164,6 +212,7 @@ export const WORKS: Work[] = [
     rationale:
       "A dev-plan proposal that also has citizen backing: NFHS shows above-average child malnutrition and three wards lack a functioning anganwadi. Moderate demand but a solid, feasible intervention.",
     quotes: ["The nearest anganwadi shut down last year."],
+    trend: { direction: "flat", changePct: -8, spark: [10, 11, 9, 12, 10, 11, 9, 10, 8, 9, 8, 7] },
   },
   {
     id: "w-vocational-hq",
@@ -172,7 +221,7 @@ export const WORKS: Work[] = [
     area: "Nawada town",
     source: "plan",
     demand: 74,
-    factors: { D: 0.45, G: 0.5, P: 0.6, E: 0.5, C: 0.4, F: 0.8 },
+    factors: { D: 0.45, G: 0.5, P: 0.6, E: 0.5, C: 0.4, F: 0.8, M: 0.33 },
     evidence: [
       "74 unique citizens; primarily a dev-plan proposal",
       "No skilling gap data confirming acute need",
@@ -181,6 +230,7 @@ export const WORKS: Work[] = [
     rationale:
       "Proposed in the development plan. Citizen demand is modest (74) and public data shows no acute skilling deficit relative to the education gap in Ward 7 — so despite high feasibility, it ranks below the school upgrade it competes with.",
     quotes: ["A skills centre would help, but the school comes first for our children."],
+    trend: { direction: "falling", changePct: -35, spark: [14, 13, 15, 12, 11, 10, 9, 8, 7, 6, 6, 5] },
   },
   {
     id: "w-solar-warisaliganj",
@@ -189,11 +239,12 @@ export const WORKS: Work[] = [
     area: "Warisaliganj",
     source: "plan",
     demand: 63,
-    factors: { D: 0.4, G: 0.35, P: 0.55, E: 0.45, C: 0.35, F: 0.85 },
+    factors: { D: 0.4, G: 0.35, P: 0.55, E: 0.45, C: 0.35, F: 0.85, M: 0.51 },
     evidence: ["63 unique citizens", "Grid coverage already 89%", "Cheap, quick to deliver"],
     rationale:
       "A quick, cheap dev-plan item. Feasibility is high, but with 89% grid coverage the service gap is small and demand is low, so it sits near the bottom under the default weights.",
     quotes: ["The market is unsafe after dark."],
+    trend: { direction: "flat", changePct: 2, spark: [6, 7, 5, 6, 7, 6, 6, 5, 6, 7, 6, 6] },
   },
 ];
 
@@ -230,11 +281,17 @@ export const THEMES: Theme[] = [
 ];
 
 /** Weighted-sum ranking score (0–100). Weights are normalised so any
- *  slider combination keeps the score on the same scale. */
+ *  slider combination keeps the score on the same scale. Loops the factor
+ *  set so every factor (incl. Momentum) is scored uniformly — no factor is
+ *  silently left out of the blend. */
 export function scoreWork(f: Factors, w: Weights): number {
-  const sum = w.D + w.G + w.P + w.E + w.C + w.F || 1;
-  const s = (w.D * f.D + w.G * f.G + w.P * f.P + w.E * f.E + w.C * f.C + w.F * f.F) / sum;
-  return Math.round(s * 100);
+  let sum = 0;
+  let acc = 0;
+  for (const k of FACTOR_ORDER) {
+    sum += w[k] ?? 0;
+    acc += (w[k] ?? 0) * (f[k] ?? 0); // tolerate a factor missing on older snapshots
+  }
+  return Math.round((acc / (sum || 1)) * 100);
 }
 
 export function confidence(f: Factors): "high" | "medium" | "low" {

@@ -12,7 +12,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useRef } from "react";
-import { AREA_CENTROIDS } from "@/lib/publicData";
+import { AREA_CENTROIDS, resolveAreaName } from "@/lib/publicData";
 import { CATEGORY_ORDER, CATEGORY_COLOR, categoryHex, type PublicSubmission } from "@/lib/sampleData";
 
 const DETAIL_ZOOM = 12; // at/above this zoom, show individual query markers
@@ -95,6 +95,29 @@ export function GoogleDemandMap({
           markersRef.current = [];
         };
 
+        // Fit the viewport to where the queries actually are, so a submission
+        // anywhere (even outside the seeded constituency) is always visible.
+        const fitToData = () => {
+          const subs = subsRef.current;
+          const pts = subs.map((s) => s.coords).filter((c) => c && Number.isFinite(c.lat) && Number.isFinite(c.lng));
+          if (!pts.length) {
+            map.setCenter(centerOfConstituency());
+            map.setZoom(10);
+            return;
+          }
+          if (pts.length === 1) {
+            map.setCenter(pts[0]);
+            map.setZoom(13);
+            return;
+          }
+          const bounds = new maps.LatLngBounds();
+          pts.forEach((c) => bounds.extend(c));
+          map.fitBounds(bounds, 64);
+          maps.event.addListenerOnce(map, "idle", () => {
+            if ((map.getZoom() ?? 0) > 14) map.setZoom(14);
+          });
+        };
+
         const render = () => {
           if (!mapRef.current) return;
           clear();
@@ -102,18 +125,22 @@ export function GoogleDemandMap({
           const subs = subsRef.current;
 
           if (zoom < DETAIL_ZOOM) {
-            // aggregate: one bubble per area, sized + labelled by count
-            const agg = new Map<string, { count: number; cats: Map<string, number> }>();
+            // aggregate: one bubble per area, positioned at the mean of its
+            // members' real coords (not a fixed centroid) so bubbles sit where
+            // the queries are — wherever that is.
+            const agg = new Map<string, { count: number; cats: Map<string, number>; latSum: number; lngSum: number }>();
             for (const s of subs) {
-              if (!agg.has(s.area)) agg.set(s.area, { count: 0, cats: new Map() });
-              const e = agg.get(s.area)!;
+              const area = resolveAreaName(s.area);
+              if (!agg.has(area)) agg.set(area, { count: 0, cats: new Map(), latSum: 0, lngSum: 0 });
+              const e = agg.get(area)!;
               e.count++;
               e.cats.set(s.category, (e.cats.get(s.category) ?? 0) + 1);
+              e.latSum += s.coords.lat;
+              e.lngSum += s.coords.lng;
             }
             const max = Math.max(1, ...[...agg.values()].map((e) => e.count));
             for (const [area, e] of agg) {
-              const c = AREA_CENTROIDS[area];
-              if (!c) continue;
+              const c = { lat: e.latSum / e.count, lng: e.lngSum / e.count };
               const topCat = [...e.cats.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Other";
               const r = Math.round(16 + 20 * (e.count / max));
               const size = r * 2;
@@ -162,8 +189,10 @@ export function GoogleDemandMap({
 
         render();
         map.addListener("zoom_changed", render);
-        // expose render so the submissions effect can refresh markers
+        // expose render + fit so the submissions effect can refresh them
         (mapRef.current as any).__render = render;
+        (mapRef.current as any).__fit = fitToData;
+        fitToData();
       })
       .catch(() => {
         if (!cancelled) onError();
@@ -177,10 +206,12 @@ export function GoogleDemandMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey]);
 
-  // redraw markers when the submissions change
+  // redraw markers + refit the viewport when the submissions change
   useEffect(() => {
-    const r = mapRef.current?.__render;
-    if (r) r();
+    const m = mapRef.current;
+    if (!m) return;
+    m.__fit?.();
+    m.__render?.();
   }, [submissions]);
 
   return (

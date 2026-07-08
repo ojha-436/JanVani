@@ -13,7 +13,7 @@
    required to demo.
    ------------------------------------------------------------------ */
 
-import type { Factors, HotspotArea, Theme, Work } from "./dashboardData";
+import { DEFAULT_WEIGHTS, FACTOR_ORDER, type Factors, type HotspotArea, type Theme, type Trend, type TrendDirection, type Work } from "./dashboardData";
 import {
   AREAS,
   areaData,
@@ -21,6 +21,8 @@ import {
   beneficiaries,
   CONSTITUENCY_META,
   equity,
+  maxDeficitArea,
+  nearestArea,
   serviceGap,
   topDataDeficit,
   type AreaData,
@@ -36,6 +38,7 @@ export type SubmissionRow = {
   need_en: string;
   urgency: number; // 0..1
   area: string; // area name; "" if not resolved
+  coords?: { lat: number; lng: number } | null; // GPS, when captured
   locale: string;
   anonymous: boolean;
 };
@@ -86,6 +89,7 @@ type RawWork = {
   dRaw: number;
   benef: number;
   quotes: string[];
+  trend?: Trend;
 };
 
 export type RankingResult = {
@@ -117,24 +121,30 @@ export function computeRanking(subs: SubmissionRow[], now: string = NOW_FALLBACK
   // ---- 1. Assign an area to every submission (heuristic geo) ----
   const assigned = subs.map((s) => {
     const cat = (validCats.has(s.category) ? s.category : "Other") as Category;
-    let area = s.area;
-    if (!area) {
-      // Unknown location → attribute to the area with the largest measured
-      // deficit for this category (the area most likely to be meant).
-      area = AREAS.reduce((best, a) => (serviceGap(cat, a) > serviceGap(cat, areaData(best)) ? a.name : best), AREAS[0].name);
-    }
+    // Resolve a blank area the SAME way the submissions API does: by GPS
+    // (nearest area) when we have coordinates, else the largest-deficit area
+    // for the category. This keeps the ranked work and the map/drill-down in
+    // agreement about where a voice lives.
+    const area = s.area || (s.coords ? nearestArea(s.coords) : maxDeficitArea(cat));
     return { ...s, category: cat, area };
   });
 
   // ---- 2. Cluster into demand themes: (category × area) ----
-  type Bucket = { category: Category; area: string; byCitizen: Map<string, { urgency: number; ageDays: number; need: string }> };
+  type Bucket = {
+    category: Category;
+    area: string;
+    byCitizen: Map<string, { urgency: number; ageDays: number; need: string }>;
+    times: number[]; // every submission's createdAt (ms) — feeds momentum
+  };
   const buckets = new Map<string, Bucket>();
 
   for (const s of assigned) {
     const key = `${s.category}::${s.area}`;
-    if (!buckets.has(key)) buckets.set(key, { category: s.category, area: s.area, byCitizen: new Map() });
+    if (!buckets.has(key)) buckets.set(key, { category: s.category, area: s.area, byCitizen: new Map(), times: [] });
     const b = buckets.get(key)!;
-    const ageDays = Math.max(0, (nowMs - (Date.parse(s.createdAt) || nowMs)) / 86_400_000);
+    const tMs = Date.parse(s.createdAt) || nowMs;
+    b.times.push(tMs);
+    const ageDays = Math.max(0, (nowMs - tMs) / 86_400_000);
     const prev = b.byCitizen.get(s.citizenKey);
     // Keep the strongest / most recent signal per unique citizen.
     if (!prev || s.urgency > prev.urgency) {
@@ -164,6 +174,7 @@ export function computeRanking(subs: SubmissionRow[], now: string = NOW_FALLBACK
       dRaw,
       benef: beneficiaries(b.category, areaData(b.area)),
       quotes,
+      trend: computeTrend(b.times, nowMs),
     });
   }
 
@@ -180,6 +191,7 @@ export function computeRanking(subs: SubmissionRow[], now: string = NOW_FALLBACK
       dRaw: backing ? sumDRaw(backing.byCitizen, nowMs) : 0,
       benef: beneficiaries(p.category, areaData(p.area)),
       quotes: [],
+      trend: backing ? computeTrend(backing.times, nowMs) : undefined,
     });
   }
 
@@ -200,7 +212,10 @@ export function computeRanking(subs: SubmissionRow[], now: string = NOW_FALLBACK
     const E = equity(a);
     const C = corroboration(w.category, a);
     const F = clamp01(baseFeasibility(w.category) + (w.source === "plan" ? 0.1 : 0));
-    const factors: Factors = { D: round2(D), G: round2(G), P: round2(P), E: round2(E), C: round2(C), F: round2(F) };
+    // Momentum → 0..1: recent-vs-prior demand change, neutral (0.5) when there's
+    // no trend (e.g. a plan work with no citizen backing) so it isn't penalised.
+    const M = w.trend ? clamp01(0.5 + w.trend.changePct / 200) : 0.5;
+    const factors: Factors = { D: round2(D), G: round2(G), P: round2(P), E: round2(E), C: round2(C), F: round2(F), M: round2(M) };
 
     return {
       id: w.id,
@@ -213,6 +228,7 @@ export function computeRanking(subs: SubmissionRow[], now: string = NOW_FALLBACK
       evidence: buildEvidence(w, a),
       rationale: "", // filled by the recompute route (Gemini) or a template
       quotes: w.quotes.length ? w.quotes : defaultQuote(w.category),
+      trend: w.trend,
     };
   });
 
@@ -286,6 +302,31 @@ function sumDRaw(byCitizen: Map<string, { urgency: number; ageDays: number }>, _
   return d;
 }
 
+/** Momentum from raw submission timestamps: a 12-week volume sparkline plus
+ *  a recent-30d-vs-prior-30d change. This is what turns the dashboard from a
+ *  photograph into a movie — a rising need is a political emergency, a flat
+ *  chronic one is a budget line. */
+function computeTrend(times: number[], nowMs: number): Trend {
+  const WEEK = 7 * 86_400_000;
+  const WEEKS = 12;
+  const spark = new Array<number>(WEEKS).fill(0);
+  let recent = 0;
+  let prev = 0;
+  for (const t of times) {
+    const age = nowMs - t;
+    if (age < 0) continue;
+    const wk = Math.floor(age / WEEK);
+    if (wk < WEEKS) spark[WEEKS - 1 - wk]++; // oldest → newest
+    if (age < 30 * 86_400_000) recent++;
+    else if (age < 60 * 86_400_000) prev++;
+  }
+  const changePct = prev === 0 ? (recent > 0 ? 100 : 0) : Math.round(((recent - prev) / prev) * 100);
+  let direction: TrendDirection = "flat";
+  if (recent > prev && changePct >= 20) direction = "rising";
+  else if (recent < prev && changePct <= -20) direction = "falling";
+  return { direction, changePct, spark };
+}
+
 function corroboration(category: Category, a: AreaData): number {
   if (category === topDataDeficit(a)) return 1;
   if (serviceGap(category, a) >= 0.55) return 0.6;
@@ -293,8 +334,15 @@ function corroboration(category: Category, a: AreaData): number {
 }
 
 function defaultScore(f: Factors): number {
-  // PRD default weights wD=.30 wG=.25 wP=.20 wE=.15 wC=.05 wF=.05
-  return 0.3 * f.D + 0.25 * f.G + 0.2 * f.P + 0.15 * f.E + 0.05 * f.C + 0.05 * f.F;
+  // Default-weighted blend over the full factor set (incl. Momentum), so the
+  // fresh-snapshot sort matches what the dashboard shows at default weights.
+  let sum = 0;
+  let acc = 0;
+  for (const k of FACTOR_ORDER) {
+    sum += DEFAULT_WEIGHTS[k];
+    acc += DEFAULT_WEIGHTS[k] * f[k];
+  }
+  return acc / (sum || 1);
 }
 
 function shortCat(c: string): string {

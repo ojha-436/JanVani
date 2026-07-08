@@ -6,6 +6,8 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { useI18n } from "@/lib/i18n";
 import { useSession, maskAadhaar } from "@/lib/profile";
+import { deriveWorkId, recordQuery } from "@/lib/queries";
+import { CONSTITUENCIES_BY_STATE, constituencyLabel } from "@/lib/constituencies";
 
 type Mode = "voice" | "text" | "photo";
 type IdMode = "anon" | "aadhaar";
@@ -55,8 +57,15 @@ export default function SubmitPage() {
   // ---- shared content fields ----
   const [text, setText] = useState("");
   const [category, setCategory] = useState<number | null>(null);
+  const [constituency, setConstituency] = useState("");
   const [location, setLocation] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Prefill constituency from the signed-in profile — the issue is routed to
+  // that constituency's MP. Required so every voice maps to a dashboard.
+  useEffect(() => {
+    if (profile?.constituency) setConstituency(profile.constituency);
+  }, [profile]);
 
   // ---- voice ----
   const [recording, setRecording] = useState(false);
@@ -106,6 +115,11 @@ export default function SubmitPage() {
     setPhotoUrl(URL.createObjectURL(file));
   }
 
+  function clearPhoto() {
+    photoFile.current = null;
+    setPhotoUrl(null);
+  }
+
   function useMyLocation() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -124,6 +138,10 @@ export default function SubmitPage() {
       setError("Please speak, type, or add a photo describing the need.");
       return;
     }
+    if (!constituency.trim()) {
+      setError("Please enter your constituency so we can route this to the right MP.");
+      return;
+    }
     setStatus("sending");
     setError(null);
     try {
@@ -131,6 +149,7 @@ export default function SubmitPage() {
       fd.append("text", text);
       fd.append("locale", locale);
       fd.append("category", category !== null ? t.submit.categories[category] : "");
+      fd.append("constituency", constituency.trim());
       fd.append("location", location);
       if (coords) fd.append("coords", JSON.stringify(coords));
       fd.append("anonymous", String(anonymous));
@@ -143,6 +162,24 @@ export default function SubmitPage() {
 
       const res = await fetch("/api/submissions", { method: "POST", body: fd });
       if (!res.ok) throw new Error(`Server responded ${res.status}`);
+      // Remember this query on-device so "Your queries" can show the MP's
+      // action on it later (submissions are otherwise anonymous).
+      try {
+        const data = await res.json();
+        if (data?.id) {
+          const area = String(data.area ?? "");
+          recordQuery({
+            id: data.id,
+            workId: deriveWorkId(String(data.category ?? "Other"), area),
+            category: String(data.category ?? "Other"),
+            area,
+            need_en: String(data.need_en ?? text),
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        /* response not JSON — still a success */
+      }
       setStatus("done");
     } catch (e) {
       setStatus("error");
@@ -268,6 +305,26 @@ export default function SubmitPage() {
                 {recording ? t.submit.recording : audioUrl ? t.submit.recorded : t.submit.recordStart}
               </p>
               {audioUrl && !recording && <audio controls src={audioUrl} className="mt-4 w-full max-w-xs" />}
+
+              {/* optional reference photo alongside the voice note */}
+              <div className="mt-7 w-full border-t border-[var(--color-line)] pt-5 text-left">
+                <span className="label">{t.submit.photoLabel}</span>
+                <p className="mb-3 text-sm text-[var(--color-ink-soft)]">{t.submit.photoHint}</p>
+                {photoUrl ? (
+                  <div className="flex items-start gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photoUrl} alt="Reference preview" className="max-h-36 rounded-xl border border-[var(--color-line)] object-contain" />
+                    <button type="button" className="text-sm font-semibold text-[var(--color-terracotta)] underline" onClick={clearPhoto}>
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <label className="btn btn-ghost inline-flex cursor-pointer items-center gap-2">
+                    <CamIcon /> {t.submit.photoTab}
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
+                  </label>
+                )}
+              </div>
             </div>
           )}
 
@@ -307,6 +364,32 @@ export default function SubmitPage() {
 
         {/* ---------- shared metadata ---------- */}
         <div className="mt-6 space-y-6">
+          <div>
+            <label className="label" htmlFor="constituency">
+              {t.submit.constituencyLabel} <span className="text-[var(--color-terracotta)]">*</span>
+            </label>
+            <select
+              id="constituency"
+              className="field"
+              value={constituency}
+              onChange={(e) => setConstituency(e.target.value)}
+              required
+              aria-required="true"
+            >
+              <option value="">{t.submit.constituencyPlaceholder}</option>
+              {CONSTITUENCIES_BY_STATE.map((g) => (
+                <optgroup key={g.state} label={g.state}>
+                  {g.items.map((c) => (
+                    <option key={`${g.state}-${c.no}`} value={c.name}>
+                      {constituencyLabel(c)}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-[var(--color-ink-soft)]">{t.submit.constituencyHint}</p>
+          </div>
+
           <div>
             <span className="label">{t.submit.categoryLabel}</span>
             <div className="flex flex-wrap gap-2">

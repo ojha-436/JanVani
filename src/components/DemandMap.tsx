@@ -15,8 +15,8 @@
    Maps tiles (ARCHITECTURE.md §6.2); the data + interactions are identical.
    ------------------------------------------------------------------ */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AREA_CENTROIDS } from "@/lib/publicData";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AREA_CENTROIDS, resolveAreaName } from "@/lib/publicData";
 import { CATEGORY_COLOR, CATEGORY_ORDER, type PublicSubmission } from "@/lib/sampleData";
 import { GoogleDemandMap } from "./GoogleDemandMap";
 
@@ -49,18 +49,6 @@ const DETAIL_ZOOM = 2.2; // scale at/above which individual points show
 const MIN_S = 1;
 const MAX_S = 8;
 
-// Projection bounds from the constituency's area centroids.
-const LATS = Object.values(AREA_CENTROIDS).map((c) => c.lat);
-const LNGS = Object.values(AREA_CENTROIDS).map((c) => c.lng);
-const MIN_LAT = Math.min(...LATS), MAX_LAT = Math.max(...LATS);
-const MIN_LNG = Math.min(...LNGS), MAX_LNG = Math.max(...LNGS);
-
-function project(lng: number, lat: number): [number, number] {
-  const x = MARGIN + ((lng - MIN_LNG) / (MAX_LNG - MIN_LNG || 1)) * (W - 2 * MARGIN);
-  const y = MARGIN + ((MAX_LAT - lat) / (MAX_LAT - MIN_LAT || 1)) * (H - 2 * MARGIN);
-  return [x, y];
-}
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 type AreaAgg = { name: string; count: number; topCat: string; x: number; y: number };
@@ -78,30 +66,65 @@ function SvgDemandMap({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
-  // ---- aggregates per area ----
-  const { areas, maxCount } = useMemo(() => {
-    const m = new Map<string, { count: number; cats: Map<string, number> }>();
+  // Projection bounds derived from the actual submissions (so queries anywhere
+  // are in-frame), falling back to the constituency centroids when there's no
+  // usable GPS. Padded so points aren't flush against the edge.
+  const bounds = useMemo(() => {
+    const lats: number[] = [];
+    const lngs: number[] = [];
     for (const s of submissions) {
-      if (!m.has(s.area)) m.set(s.area, { count: 0, cats: new Map() });
-      const e = m.get(s.area)!;
+      if (Number.isFinite(s.coords?.lat) && Number.isFinite(s.coords?.lng)) {
+        lats.push(s.coords.lat);
+        lngs.push(s.coords.lng);
+      }
+    }
+    if (lats.length < 2) {
+      for (const c of Object.values(AREA_CENTROIDS)) {
+        lats.push(c.lat);
+        lngs.push(c.lng);
+      }
+    }
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    const padLat = (maxLat - minLat || 0.1) * 0.12;
+    const padLng = (maxLng - minLng || 0.1) * 0.12;
+    return { minLat: minLat - padLat, maxLat: maxLat + padLat, minLng: minLng - padLng, maxLng: maxLng + padLng };
+  }, [submissions]);
+
+  const project = useCallback(
+    (lng: number, lat: number): [number, number] => {
+      const x = MARGIN + ((lng - bounds.minLng) / (bounds.maxLng - bounds.minLng || 1)) * (W - 2 * MARGIN);
+      const y = MARGIN + ((bounds.maxLat - lat) / (bounds.maxLat - bounds.minLat || 1)) * (H - 2 * MARGIN);
+      return [x, y];
+    },
+    [bounds]
+  );
+
+  // ---- aggregates per area, positioned at the mean of member coords ----
+  const { areas, maxCount } = useMemo(() => {
+    const m = new Map<string, { count: number; cats: Map<string, number>; latSum: number; lngSum: number }>();
+    for (const s of submissions) {
+      const area = resolveAreaName(s.area);
+      if (!m.has(area)) m.set(area, { count: 0, cats: new Map(), latSum: 0, lngSum: 0 });
+      const e = m.get(area)!;
       e.count++;
       e.cats.set(s.category, (e.cats.get(s.category) ?? 0) + 1);
+      e.latSum += s.coords.lat;
+      e.lngSum += s.coords.lng;
     }
     const areas: AreaAgg[] = [];
     for (const [name, e] of m) {
-      const c = AREA_CENTROIDS[name];
-      if (!c) continue;
-      const [x, y] = project(c.lng, c.lat);
+      const [x, y] = project(e.lngSum / e.count, e.latSum / e.count);
       const topCat = [...e.cats.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Other";
       areas.push({ name, count: e.count, topCat, x, y });
     }
     return { areas, maxCount: Math.max(1, ...areas.map((a) => a.count)) };
-  }, [submissions]);
+  }, [submissions, project]);
 
-  // Pre-project individual points once (transform applied at render time).
+  // Pre-project individual points (transform applied at render time).
   const points = useMemo(
     () => submissions.map((s) => ({ s, base: project(s.coords.lng, s.coords.lat) })),
-    [submissions]
+    [submissions, project]
   );
 
   const toScreen = (bx: number, by: number): [number, number] => [bx * scale + tx, by * scale + ty];

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Logo } from "./Logo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { AccountMenu } from "./AccountMenu";
 import { useI18n } from "@/lib/i18n";
 import { useSession } from "@/lib/profile";
 
@@ -57,8 +58,9 @@ export function Header() {
             {t.nav.submit}
           </Link>
           <button
-            className="btn btn-ghost !p-2.5 !min-h-0 md:hidden"
-            aria-label="Menu"
+            className="btn btn-ghost !p-2.5 !min-h-0"
+            aria-label="Account menu"
+            aria-expanded={open}
             onClick={() => setOpen((o) => !o)}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -68,20 +70,7 @@ export function Header() {
         </div>
       </div>
 
-      {open && (
-        <nav className="border-t border-[var(--color-line)] px-5 py-3 md:hidden">
-          {[...links, session ? { href: "/profile", label: t.nav.profile } : { href: "/sign-in", label: t.nav.signIn }].map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              onClick={() => setOpen(false)}
-              className="block py-2.5 font-medium text-[var(--color-ink-soft)]"
-            >
-              {l.label}
-            </a>
-          ))}
-        </nav>
-      )}
+      <AccountMenu open={open} onClose={() => setOpen(false)} navLinks={links} />
     </header>
   );
 }

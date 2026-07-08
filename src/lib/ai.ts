@@ -8,7 +8,9 @@
    - Photo + text reasoning:  Gemini on Vertex AI
    ------------------------------------------------------------------ */
 
-import { AREA_NAMES, CONSTITUENCY_META } from "./publicData";
+import { AREA_NAMES, CONSTITUENCY_META, nearestArea } from "./publicData";
+import { WORK_STATUSES, type AssistantResponse, type WorkStatusValue } from "./dashboardData";
+import { categoryBand, type CostEstimate } from "./estimate";
 
 // Same single switch as firebaseAdmin: AI calls only fire when
 // GOOGLE_CLOUD_PROJECT is set, so demo/local runs make no (paid) Vertex calls.
@@ -218,13 +220,163 @@ export async function rationaleFor(input: {
   }
 }
 
+/* ---------------- Dashboard assistant (Gemini, grounded) ---------------- */
+
+/** Compact per-work context handed to the assistant. */
+export type AssistantWork = {
+  id: string;
+  title: string;
+  category: string;
+  area: string;
+  demand: number;
+  score: number; // 0..100 at default weights
+  status: WorkStatusValue;
+  trend?: string; // "rising" | "falling" | "flat"
+  changePct?: number;
+};
+
+/** Answer an MP's question grounded in the live ranked works + momentum +
+ *  status, and — only when they clearly ask — propose a status change the MP
+ *  confirms before it applies. Returns null when AI is off or the call fails
+ *  (the route then uses a deterministic rule-based fallback). */
+export async function askAssistant(input: {
+  message: string;
+  works: AssistantWork[];
+  constituency: { name: string; state: string; voices: number };
+  history?: { role: "user" | "assistant"; content: string }[];
+}): Promise<AssistantResponse | null> {
+  if (!aiEnabled()) return null;
+  try {
+    const model = await geminiModel();
+    const hist = (input.history ?? [])
+      .slice(-6)
+      .map((h) => `${h.role === "assistant" ? "Assistant" : "MP"}: ${h.content}`)
+      .join("\n");
+    const prompt = [
+      "You are the assistant embedded in an Indian MP's JanVaani constituency dashboard.",
+      `Constituency: ${input.constituency.name}, ${input.constituency.state} — ${input.constituency.voices} citizen voices.`,
+      "You help the MP understand citizen demand, its momentum (rising/falling/flat), and act on it.",
+      "You are given the current ranked works as JSON. Fields: id, title, category, area, demand (unique citizens),",
+      "score (0-100 priority), status, trend, changePct (recent 30d vs prior 30d).",
+      "Answer concisely and specifically, citing the real numbers from the data. NEVER invent data or works.",
+      `Valid statuses: ${WORK_STATUSES.join(", ")}.`,
+      "Only if the MP clearly asks to change/mark/update a work's status, include an action for the matching work id.",
+      "",
+      "WORKS_JSON:",
+      JSON.stringify(input.works),
+      hist ? "\nRecent conversation:\n" + hist : "",
+      "",
+      `MP: ${input.message}`,
+      "",
+      'Return ONLY JSON: {"reply": string (<=90 words, plain text, no markdown),',
+      ' "action"?: {"type":"setStatus","workId": string,"workTitle": string,"status": <one valid status>}}',
+    ].join("\n");
+
+    const r = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] });
+    const text = r.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const p = firstJson<{ reply?: string; action?: { type?: string; workId?: string; status?: string } }>(text, {});
+    const reply = (p.reply ?? "").trim();
+    if (!reply) return null;
+
+    let action: AssistantResponse["action"];
+    const a = p.action;
+    if (a && a.type === "setStatus" && a.workId && WORK_STATUSES.includes(a.status as WorkStatusValue)) {
+      const w = input.works.find((x) => x.id === a.workId);
+      if (w) action = { type: "setStatus", workId: w.id, workTitle: w.title, status: a.status as WorkStatusValue };
+    }
+    return { reply, action };
+  } catch (err) {
+    console.warn("[ai] askAssistant failed:", (err as Error).message);
+    return null;
+  }
+}
+
+/* ---------------- Feasibility & cost estimate (Gemini) ---------------- */
+
+/** Draft a structured feasibility + cost estimate for a citizen need. Grounded
+ *  in typical Indian govt Schedule-of-Rates ranges; an early-prioritisation aid,
+ *  NOT a quotation. Returns null when AI is off or the call fails (the route
+ *  then uses the deterministic category-band fallback). */
+export async function estimateFeasibility(input: {
+  need: string;
+  category: string;
+  area: string;
+  constituency?: string;
+}): Promise<CostEstimate | null> {
+  if (!aiEnabled() || !input.need.trim()) return null;
+  try {
+    const model = await geminiModel();
+    const band = categoryBand(input.category);
+    const prompt = [
+      "You are a civil-works estimator for an Indian MP's constituency (rural / small-town, Bihar context).",
+      "Given ONE citizen need, produce a rough feasibility + cost estimate for EARLY PRIORITISATION — NOT a tender or quotation.",
+      "Use typical Indian government Schedule-of-Rates ranges, in INR. Be realistic and conservative; prefer a range over a point number.",
+      `For reference, ${input.category} works in this setting typically fall roughly between ₹${band.low.toLocaleString("en-IN")} and ₹${band.high.toLocaleString("en-IN")}; only depart from this if the need clearly warrants it.`,
+      "MPLADS funds DURABLE COMMUNITY ASSETS (roads, buildings, drinking water, etc.); it does NOT fund salaries, recurring costs, or individual benefits — reflect this in eligibility.",
+      "",
+      `Citizen need: """${input.need}"""`,
+      `Category: ${input.category}. Area: ${input.area || "unspecified"}. Constituency: ${input.constituency || CONSTITUENCY_META.name}.`,
+      "",
+      "Return ONLY JSON:",
+      '{"scope": string (<=20 words),',
+      ' "eligibility": {"mplads": boolean, "note": string (<=20 words)},',
+      ' "boq": [{"item": string, "qty": string, "note"?: string}] (2–5 line items),',
+      ' "costLow": number (INR), "costHigh": number (INR),',
+      ' "timelineWeeks": {"low": number, "high": number},',
+      ' "risks": string[] (2–4), "assumptions": string[] (1–3),',
+      ' "confidence": "low" | "medium" | "high"}',
+    ].join("\n");
+
+    const r = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] });
+    const text = r.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const p = firstJson<Partial<CostEstimate>>(text, {});
+
+    const costLow = Number(p.costLow);
+    const costHigh = Number(p.costHigh);
+    if (!Number.isFinite(costLow) || !Number.isFinite(costHigh) || costLow <= 0 || costHigh < costLow) return null;
+
+    const conf = p.confidence === "high" || p.confidence === "medium" || p.confidence === "low" ? p.confidence : "medium";
+    const arr = (v: unknown, cap: number): string[] => (Array.isArray(v) ? v.slice(0, cap).map(String) : []);
+
+    return {
+      scope: (p.scope ?? "").toString().trim() || `${input.category} works in ${input.area || "the area"}`,
+      eligibility: {
+        mplads: Boolean(p.eligibility?.mplads),
+        note: (p.eligibility?.note ?? "").toString().trim() || "Confirm against current MPLADS guidelines.",
+      },
+      boq: Array.isArray(p.boq)
+        ? p.boq.slice(0, 6).map((b) => ({ item: String(b?.item ?? "Item"), qty: String(b?.qty ?? "—"), note: b?.note ? String(b.note) : undefined }))
+        : [],
+      costLow: Math.round(costLow),
+      costHigh: Math.round(costHigh),
+      timelineWeeks: {
+        low: Math.max(1, Math.round(Number(p.timelineWeeks?.low) || band.weeks[0])),
+        high: Math.max(1, Math.round(Number(p.timelineWeeks?.high) || band.weeks[1])),
+      },
+      risks: arr(p.risks, 4),
+      assumptions: arr(p.assumptions, 3),
+      confidence: conf,
+      source: "ai",
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.warn("[ai] estimateFeasibility failed:", (err as Error).message);
+    return null;
+  }
+}
+
 /* ---------------- Geocoding (area assignment) ---------------- */
 
 /** Map a free-text location / GPS to one of the constituency's areas.
  *  For the hackathon this is a name-match against known areas (no paid
- *  Maps call); coords fall back to the busiest area if no name matches. */
-export function geocodeToArea(location: string, _coords?: { lat: number; lng: number } | null): string {
+ *  Maps call) first; if the text doesn't name a known area but a GPS fix
+ *  was captured (e.g. the voice-complaint flow, which never types a
+ *  location), fall back to the nearest area centroid so every submission
+ *  with coordinates still resolves to a real area instead of "". */
+export function geocodeToArea(location: string, coords?: { lat: number; lng: number } | null): string {
   const loc = (location || "").toLowerCase();
   const hit = AREA_NAMES.find((a) => loc.includes(a.toLowerCase()));
-  return hit || "";
+  if (hit) return hit;
+  if (coords) return nearestArea(coords);
+  return "";
 }

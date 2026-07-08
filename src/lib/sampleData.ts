@@ -26,6 +26,9 @@ export type PublicSubmission = {
   hasPhoto: boolean;
   hasAudio: boolean;
   location: string;
+  /** Server-mediated media endpoints (live mode only; absent in samples). */
+  photoUrl?: string;
+  audioUrl?: string;
 };
 
 /** Category → brand colour CSS var (for in-DOM SVG that inherits theme tokens). */
