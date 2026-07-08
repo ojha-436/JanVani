@@ -7,21 +7,28 @@
    ============================================================ */
 
 @theme {
-  /* Core palette */
-  --color-paper: #f6f1e7;
-  --color-paper-deep: #efe7d6;
-  --color-ink: #16221d;
-  --color-ink-soft: #3c4a43;
-  --color-marigold: #e39a1c;
-  --color-marigold-deep: #c67d0a;
-  --color-terracotta: #b64a34;
-  --color-sage: #4f6f60;
-  --color-indigo: #263a63;
-  --color-line: #d8cdb8;
+  /* Core palette. Each token carries its light and dark value via
+     light-dark(); the [data-theme] color-scheme switch below picks the
+     side. (A plain [data-theme="dark"]{--token: …} override block gets
+     stripped by the Tailwind v4/LightningCSS build, and LightningCSS
+     polyfills light-dark() for older browsers — so this is both the
+     supported and the only-surviving way to theme these tokens.)
+     Dark = same ledger read by lamplight: deep forest surfaces, warm
+     cream ink, marigold kept as the civic accent. */
+  --color-paper: light-dark(#f6f1e7, #101713);
+  --color-paper-deep: light-dark(#efe7d6, #0b100d);
+  --color-ink: light-dark(#16221d, #ece5d4);
+  --color-ink-soft: light-dark(#3c4a43, #b6ae9d);
+  --color-marigold: light-dark(#e39a1c, #edaa2f);
+  --color-marigold-deep: light-dark(#c67d0a, #d18a10);
+  --color-terracotta: light-dark(#b64a34, #d4694f);
+  --color-sage: light-dark(#4f6f60, #86ab99);
+  --color-indigo: light-dark(#263a63, #97abdb);
+  --color-line: light-dark(#d8cdb8, #2b3831);
   /* Surfaces that used to be hardcoded — tokenized so dark mode can remap them. */
-  --color-card: rgba(255, 253, 248, 0.72);
-  --color-field: #fffdf8;
-  --color-placeholder: #9a9384;
+  --color-card: light-dark(rgba(255, 253, 248, 0.72), rgba(26, 35, 30, 0.78));
+  --color-field: light-dark(#fffdf8, #18211c);
+  --color-placeholder: light-dark(#9a9384, #71806f);
 
   /* Type */
   --font-display: var(--font-fraunces), Georgia, serif;
@@ -40,26 +47,11 @@
 }
 
 /* ---------- Dark mode ----------
-   Same ledger, read by lamplight: deep forest surfaces, warm cream ink,
-   marigold kept as the civic accent. Applied via data-theme on <html>
-   (set pre-paint by the inline script in layout.tsx, managed by
-   src/lib/theme.tsx). Tailwind v4 utilities reference these vars, so
-   remapping tokens here re-themes every bg-*/text-*/border-* utility. */
+   The tokens above are light-dark() pairs; flipping color-scheme here is
+   what switches every one of them. data-theme is set pre-paint by the
+   inline script in layout.tsx and managed by src/lib/theme.tsx. */
 [data-theme="dark"] {
   color-scheme: dark;
-  --color-paper: #101713;
-  --color-paper-deep: #0b100d;
-  --color-ink: #ece5d4;
-  --color-ink-soft: #b6ae9d;
-  --color-marigold: #edaa2f;
-  --color-marigold-deep: #d18a10;
-  --color-terracotta: #d4694f;
-  --color-sage: #86ab99;
-  --color-indigo: #97abdb;
-  --color-line: #2b3831;
-  --color-card: rgba(26, 35, 30, 0.78);
-  --color-field: #18211c;
-  --color-placeholder: #71806f;
 }
 
 [data-theme="dark"] body {

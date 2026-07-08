@@ -87,8 +87,11 @@ export function useTheme(): ThemeValue {
 export function ThemeToggle({ className = "" }: { className?: string }) {
   const { preference, resolved, setPreference } = useTheme();
 
-  const next: ThemePreference =
-    preference === "light" ? "dark" : preference === "dark" ? "system" : "light";
+  // Always flip the RESOLVED theme so the first click visibly changes the
+  // page even when the preference is still "system" — a blind
+  // light→dark→system cycle made that first click a no-op when the OS
+  // theme matched the next stop.
+  const next: ThemePreference = resolved === "dark" ? "light" : "dark";
   const label =
     preference === "system" ? `Theme: auto (${resolved})` : `Theme: ${preference}`;
 
