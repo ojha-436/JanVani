@@ -6,12 +6,14 @@ import { Logo } from "@/components/Logo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { useSession, type Session } from "@/lib/profile";
 
 type Role = "citizen" | "mp";
 type Step = "phone" | "otp";
 
 export default function SignInPage() {
   const { t } = useI18n();
+  const { signIn, isOnboarded } = useSession();
   const [role, setRole] = useState<Role>("citizen");
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
@@ -19,25 +21,28 @@ export default function SignInPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Read ?role=mp without needing a Suspense boundary.
   useEffect(() => {
     const r = new URLSearchParams(window.location.search).get("role");
     if (r === "mp") setRole("mp");
   }, []);
 
-  function requireConfig(): boolean {
-    if (!isFirebaseConfigured || !auth) {
-      setNotice(
-        "Demo mode — add your Firebase keys to .env.local to enable live sign-in. The flow and UI are fully wired."
-      );
-      return false;
-    }
-    return true;
+  const demo = !isFirebaseConfigured || !auth;
+
+  // Persist the session, then route: MPs to the dashboard, first-time
+  // citizens to one-time onboarding, returning citizens to their profile.
+  function finish(partial: Omit<Session, "at">) {
+    signIn({ ...partial, at: new Date().toISOString() });
+    if (partial.role === "mp") window.location.href = "/dashboard";
+    else window.location.href = isOnboarded ? "/profile" : "/onboarding";
   }
 
   async function sendOtp() {
     setNotice(null);
-    if (!requireConfig()) return;
+    if (demo) {
+      setStep("otp");
+      setNotice("Demo mode — enter any 6 digits to continue. Add Firebase keys for real OTP.");
+      return;
+    }
     setBusy(true);
     try {
       const { RecaptchaVerifier, signInWithPhoneNumber } = await import("firebase/auth");
@@ -54,12 +59,16 @@ export default function SignInPage() {
 
   async function verifyOtp() {
     setNotice(null);
+    if (demo) {
+      finish({ method: "phone", role: "citizen", phone: normalizePhone(phone) });
+      return;
+    }
     setBusy(true);
     try {
       const confirmation = (window as unknown as { _confirm?: { confirm: (c: string) => Promise<unknown> } })._confirm;
       if (!confirmation) throw new Error("Please request an OTP first.");
       await confirmation.confirm(otp);
-      window.location.href = "/submit";
+      finish({ method: "phone", role: "citizen", phone: normalizePhone(phone) });
     } catch (e) {
       setNotice(errMessage(e));
     } finally {
@@ -67,14 +76,42 @@ export default function SignInPage() {
     }
   }
 
+  // For an MP, the constituency is NOT chosen here — it's resolved from the
+  // admin's allocation for that email (mpAccounts). Citizens get none.
+  async function mpConstituency(email?: string): Promise<string | undefined> {
+    if (role !== "mp" || !email) return undefined;
+    try {
+      const r = await fetch(`/api/mp/resolve?email=${encodeURIComponent(email)}`);
+      const d = await r.json();
+      return d.ok ? (d.constituency as string) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function google() {
     setNotice(null);
-    if (!requireConfig()) return;
+    if (demo) {
+      const email = role === "mp" ? "mp.office@gmail.com" : "citizen@gmail.com";
+      const constituency = await mpConstituency(email);
+      if (role === "mp" && !constituency) {
+        setNotice("This email isn't allocated to a constituency yet. Ask your admin for an invite link.");
+        return;
+      }
+      finish({ method: "google", role, email, constituency });
+      return;
+    }
     setBusy(true);
     try {
       const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
-      await signInWithPopup(auth!, new GoogleAuthProvider());
-      window.location.href = role === "mp" ? "/dashboard" : "/submit";
+      const res = await signInWithPopup(auth!, new GoogleAuthProvider());
+      const email = res.user.email ?? undefined;
+      const constituency = await mpConstituency(email);
+      if (role === "mp" && !constituency) {
+        setNotice("This email isn't allocated to a constituency yet. Ask your admin for an invite link.");
+        return;
+      }
+      finish({ method: "google", role, email, constituency });
     } catch (e) {
       setNotice(errMessage(e));
     } finally {
@@ -99,7 +136,6 @@ export default function SignInPage() {
           <div className="rule-ledger mt-8 max-w-xs opacity-40" />
         </div>
         <p className="max-w-xs text-sm opacity-70">{t.footer.rights}</p>
-        {/* soft glow */}
         <div
           className="pointer-events-none absolute -right-24 top-1/3 h-72 w-72 rounded-full"
           style={{ background: "radial-gradient(circle, rgba(227,154,28,0.35), transparent 70%)" }}
@@ -118,7 +154,6 @@ export default function SignInPage() {
         </div>
 
         <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-6">
-          {/* role toggle */}
           <div className="mb-8 inline-flex self-start rounded-full border border-[var(--color-line)] bg-[rgba(255,253,248,0.6)] p-1 text-sm">
             {(["citizen", "mp"] as Role[]).map((r) => (
               <button
@@ -138,18 +173,11 @@ export default function SignInPage() {
           </div>
 
           <p className="eyebrow text-[var(--color-terracotta)]">{t.auth.eyebrow}</p>
-          <h1 className="display-lg mt-2">
-            {role === "mp" ? t.auth.mpTitle : t.auth.citizenTitle}
-          </h1>
-          <p className="mt-2 text-[var(--color-ink-soft)]">
-            {role === "mp" ? t.auth.mpSub : t.auth.citizenSub}
-          </p>
+          <h1 className="display-lg mt-2">{role === "mp" ? t.auth.mpTitle : t.auth.citizenTitle}</h1>
+          <p className="mt-2 text-[var(--color-ink-soft)]">{role === "mp" ? t.auth.mpSub : t.auth.citizenSub}</p>
 
           {notice && (
-            <div
-              role="status"
-              className="mt-6 rounded-xl border border-[var(--color-marigold)] bg-[rgba(227,154,28,0.12)] px-4 py-3 text-sm"
-            >
+            <div role="status" className="mt-6 rounded-xl border border-[var(--color-marigold)] bg-[rgba(227,154,28,0.12)] px-4 py-3 text-sm">
               {notice}
             </div>
           )}
@@ -163,9 +191,7 @@ export default function SignInPage() {
                       {t.auth.phoneLabel}
                     </label>
                     <div className="flex gap-2">
-                      <span className="field flex max-w-[4.5rem] items-center justify-center font-semibold">
-                        +91
-                      </span>
+                      <span className="field flex max-w-[4.5rem] items-center justify-center font-semibold">+91</span>
                       <input
                         id="phone"
                         type="tel"

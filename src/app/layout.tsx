@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Hanken_Grotesk, Noto_Sans_Devanagari } from "next/font/google";
 import { I18nProvider } from "@/lib/i18n";
+import { SessionProvider } from "@/lib/profile";
 import "./globals.css";
 
 // Display: characterful editorial serif → civic trust.
@@ -53,7 +54,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
-        <I18nProvider>{children}</I18nProvider>
+        <I18nProvider>
+          <SessionProvider>{children}</SessionProvider>
+        </I18nProvider>
       </body>
     </html>
   );
