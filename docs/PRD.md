@@ -2,6 +2,12 @@
 
 **Author:** prince.kumar@premnathrail.com · **Updated:** 2026-07-01 · **Status:** Hackathon build (7-day)
 
+> **Implementation note (2026-07-05):** the shipped backend uses FastAPI +
+> Cloud SQL (Postgres) rather than the Firestore/BigQuery/Pub-Sub pipeline
+> described below, and calls Gemini directly instead of a batch worker. See
+> the root [README.md](../README.md#architecture-as-built) for what's actually
+> running today; this document remains the original product/goals reference.
+
 > v2 aligns the platform to the organiser's recommended Google Cloud stack
 > (Gemini / Vertex AI, BigQuery, Google Maps, Dialogflow, Speech-to-Text,
 > Firebase) and sharpens the **analysis & ranking** requirements. See

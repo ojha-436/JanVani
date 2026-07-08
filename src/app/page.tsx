@@ -3,10 +3,38 @@
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, useLocalStrings } from "@/lib/i18n";
+
+const FEATURES = {
+  en: {
+    eyebrow: "What you get",
+    title: "Not just a complaint box.",
+    items: [
+      { icon: "🧾", t: "Track every step", d: "A live timeline for each complaint — Submitted, In progress, Resolved — with real timestamps, in My Complaints.", href: "/my-complaints", cta: "My complaints" },
+      { icon: "⚖️", t: "Evidence you can check", d: "Every score comes with its reasons, computed by fixed public rules — never an AI's opinion. The full rulebook is published.", href: "/about", cta: "Read the rules" },
+      { icon: "🗺️", t: "See what's already reported", d: "Before you submit, a mini-map shows issues near your location. Repeat reports strengthen the evidence.", href: "/submit", cta: "Raise your voice" },
+      { icon: "🏅", t: "Civic standing", d: "Points for every complaint, more when they're resolved — badges at fixed thresholds, from Voice to Guardian.", href: "/profile", cta: "Your profile" },
+      { icon: "🌙", t: "Yours, comfortably", d: "Full dark mode, five languages, voice-first submission — no literacy or typing needed.", href: "/guide", cta: "How it works" },
+      { icon: "🔔", t: "MPs stay on the pulse", d: "Alert bell for strong-evidence complaints, month-vs-month comparison, printable field reports.", href: "/sign-in?role=mp", cta: "MP sign-in" },
+    ],
+  },
+  hi: {
+    eyebrow: "आपको क्या मिलता है",
+    title: "सिर्फ़ शिकायत-पेटी नहीं।",
+    items: [
+      { icon: "🧾", t: "हर कदम ट्रैक करें", d: "हर शिकायत की लाइव टाइमलाइन — दर्ज, प्रगति में, हल — असली समय के साथ, 'मेरी शिकायतें' में।", href: "/my-complaints", cta: "मेरी शिकायतें" },
+      { icon: "⚖️", t: "जाँचने लायक प्रमाण", d: "हर स्कोर अपने कारणों के साथ आता है, तय सार्वजनिक नियमों से — कभी AI की राय से नहीं।", href: "/about", cta: "नियम पढ़ें" },
+      { icon: "🗺️", t: "पहले से दर्ज देखें", d: "सबमिट से पहले मिनी-नक्शा आपके पास की समस्याएँ दिखाता है। दोहराई रिपोर्टें प्रमाण मज़बूत करती हैं।", href: "/submit", cta: "आवाज़ उठाएँ" },
+      { icon: "🏅", t: "नागरिक पहचान", d: "हर शिकायत पर अंक, हल होने पर और — Voice से Guardian तक, तय सीमाओं पर बैज।", href: "/profile", cta: "आपकी प्रोफ़ाइल" },
+      { icon: "🌙", t: "आपके आराम से", d: "पूरा डार्क मोड, पाँच भाषाएँ, आवाज़-पहले सबमिशन — लिखना ज़रूरी नहीं।", href: "/guide", cta: "कैसे काम करता है" },
+      { icon: "🔔", t: "सांसद नब्ज़ पर", d: "मज़बूत-प्रमाण शिकायतों की घंटी, महीना-दर-महीना तुलना, प्रिंट होने वाली रिपोर्ट।", href: "/sign-in?role=mp", cta: "सांसद साइन-इन" },
+    ],
+  },
+};
 
 export default function LandingPage() {
   const { t } = useI18n();
+  const features = useLocalStrings(FEATURES);
 
   const steps = [
     { n: "01", t: t.how.s1t, d: t.how.s1d, tone: "var(--color-marigold)" },
@@ -114,6 +142,35 @@ export default function LandingPage() {
                 )}
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* ---------------- FEATURES ---------------- */}
+        <section id="features" className="scroll-mt-24 bg-[var(--color-paper-deep)]">
+          <div className="mx-auto max-w-6xl px-5 py-20">
+            <div className="max-w-2xl">
+              <p className="eyebrow text-[var(--color-terracotta)]">{features.eyebrow}</p>
+              <h2 className="display-lg mt-3">{features.title}</h2>
+            </div>
+            <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {features.items.map((f) => (
+                <div key={f.t} className="card flex flex-col p-7">
+                  <span aria-hidden="true" className="text-3xl">
+                    {f.icon}
+                  </span>
+                  <h3 className="mt-4 font-display text-xl" style={{ fontWeight: 560 }}>
+                    {f.t}
+                  </h3>
+                  <p className="mt-2 flex-1 text-[0.96rem] leading-relaxed text-[var(--color-ink-soft)]">{f.d}</p>
+                  <Link
+                    href={f.href}
+                    className="mt-4 text-sm font-bold text-[var(--color-marigold-deep)] hover:underline"
+                  >
+                    {f.cta} →
+                  </Link>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 

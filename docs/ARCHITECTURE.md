@@ -4,6 +4,13 @@
 > into a defensible, explainable priority list an MP can act on.
 > Built on the organiser's recommended Google Cloud stack.
 
+> **Implementation note (2026-07-05):** the design below (Firestore, BigQuery,
+> Pub/Sub, Dialogflow) is the original plan. What's actually running is a
+> FastAPI backend on Cloud SQL (Postgres) with synchronous Gemini calls for
+> transcription, photo analysis, gov-data ingestion, and consensus detection —
+> no batch worker or BigQuery ranking engine yet. See the root
+> [README.md](../README.md#architecture-as-built) for the current state.
+
 ---
 
 ## 1. Design principles

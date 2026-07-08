@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Citizen complaint media (voice notes + photos). "Anonymous" only hides
+    // the citizen's identity from the MP — sign-in is still required to
+    // upload, to keep this from being an open write target for abuse. Files
+    // can only be created, never overwritten or deleted. Direct client read
+    // is denied — the backend mints short-lived signed URLs on demand (see
+    // app/media.py) via the Admin SDK, which bypasses these rules, so an MP
+    // dashboard still displays media without every file being permanently
+    // and publicly fetchable by anyone who guesses or leaks a URL.
+    match /complaints/{fileName} {
+      allow read: if false;
+      allow create: if request.auth != null
+                    && request.resource.size < 20 * 1024 * 1024
+                    && (request.resource.contentType.matches('audio/.*')
+                        || request.resource.contentType.matches('image/.*'));
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

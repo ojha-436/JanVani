@@ -5,18 +5,24 @@ import { useState } from "react";
 import { Logo } from "./Logo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
+import { useSession } from "@/lib/session";
+import { ThemeToggle } from "@/lib/theme";
 
 export function Header() {
   const { t } = useI18n();
+  const { firebaseUser, profile } = useSession();
   const [open, setOpen] = useState(false);
 
   const links = [
+    { href: "/", label: t.nav.home },
     { href: "/#how", label: t.nav.how },
-    { href: "/#for-mp", label: t.nav.impact },
+    { href: "/guide", label: t.nav.guide },
+    { href: "/about", label: t.nav.about },
+    ...(firebaseUser ? [{ href: "/my-complaints", label: t.nav.myComplaints }] : []),
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--color-line)] bg-[rgba(246,241,231,0.82)] backdrop-blur-md">
+    <header className="header-glass no-print sticky top-0 z-40 border-b border-[var(--color-line)] backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3.5">
         <Link href="/" aria-label="JanVaani home">
           <Logo />
@@ -36,9 +42,22 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
-          <Link href="/sign-in" className="hidden text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-block px-2">
-            {t.nav.signIn}
-          </Link>
+          <ThemeToggle />
+          {firebaseUser ? (
+            <Link
+              href="/profile"
+              className="hidden items-center gap-2 text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-flex px-1"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-ink)] text-xs font-bold text-[var(--color-marigold)]">
+                {(profile?.first_name?.[0] ?? "•").toUpperCase()}
+              </span>
+              {t.nav.profile}
+            </Link>
+          ) : (
+            <Link href="/sign-in" className="hidden text-sm font-semibold text-[var(--color-ink)] hover:underline sm:inline-block px-2">
+              {t.nav.signIn}
+            </Link>
+          )}
           <Link href="/submit" className="btn btn-marigold !py-2.5 !px-4 text-sm">
             {t.nav.submit}
           </Link>
@@ -56,7 +75,7 @@ export function Header() {
 
       {open && (
         <nav className="border-t border-[var(--color-line)] px-5 py-3 md:hidden">
-          {[...links, { href: "/sign-in", label: t.nav.signIn }].map((l) => (
+          {[...links, firebaseUser ? { href: "/profile", label: t.nav.profile } : { href: "/sign-in", label: t.nav.signIn }].map((l) => (
             <a
               key={l.href}
               href={l.href}

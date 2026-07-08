@@ -1,110 +1,218 @@
 # JanVaani — Citizen Voice → MP Action
 
 > **जनवाणी** · *"the people's voice"* — a multilingual civic-tech platform.
-> Citizens **speak, type, or photograph** what their area needs; JanVaani turns
-> thousands of voices into a **ranked, evidence-backed development plan** an MP
-> can act on.
+> Citizens **speak, type, or photograph** what their area needs; an MP gets an
+> AI-assisted, evidence-scored dashboard to decide what actually matters.
 
-Built for a 7-day hackathon. This repository currently contains the **citizen-facing
-front end** — landing, sign-in, and the multi-modal submission flow — plus the
-architecture and integration points for the AI analysis + MP dashboard.
+Built for a hackathon, now past the first working end-to-end slice: citizens
+can submit complaints (voice / text / photo) and an MP can log in to a real
+dashboard with AI-assisted prioritisation, evidence scoring, a hotspot map,
+and a government-data upload pipeline.
+
+> **Note on stack:** [docs/PRD.md](docs/PRD.md) and
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describe the original v2 plan
+> (Firestore + BigQuery + Pub/Sub + Dialogflow). The stack that actually got
+> built is simpler and is described below — a **FastAPI backend on Cloud SQL
+> (Postgres)** instead of Firestore/BigQuery, and **direct Gemini calls**
+> instead of a Pub/Sub-driven batch worker. Those two docs are kept for the
+> original design rationale but no longer reflect what's running.
 
 ---
 
-## Why it's built this way
+## What's built
 
-Four constraints drove every decision: **lightweight to load**, **secure**,
-**accessible to everyone**, and **cost-effective** — deployed on **Google Cloud**.
+### Citizen side (`/`, `/sign-in`, `/submit`, `/my-complaints`, `/guide`, `/about`)
+- Phone-OTP sign-in (Firebase Auth), multi-modal complaint submission — voice,
+  typed text, or photo.
+- Voice complaints are transcribed automatically (Gemini audio understanding);
+  photo-only complaints get an AI-generated one-line description. Both used to
+  save with blank text — fixed.
+- **Submit-flow assists**: deterministic category-suggestion chips (fixed
+  keyword rules in `backend/app/classify.py`, citizen always confirms), a
+  nearby-issues mini-map once a location is set (anonymized points only),
+  and localStorage draft auto-save/restore.
+- **`/my-complaints`**: every complaint with a live status timeline
+  (Submitted → In progress → Resolved, built from recorded transitions), its
+  Evidence strength meter, and the exact plain-language reasons behind the
+  score.
+- **Civic standing** on `/profile`: points and badges (Voice / Advocate /
+  Champion / Guardian) from the fixed rules in `backend/app/civic.py` —
+  10 pts per complaint, 25 per resolution, published thresholds.
+- **`/guide`** (bilingual step-by-step user guide + FAQ) and **`/about`**
+  (the scoring rulebook published in plain language).
+- Full i18n (English / Hindi, more dictionaries scaffolded), **dark mode**
+  (system-following with manual override, no-flash).
 
-| Layer | Technology | Rationale |
+### MP side (`/dashboard`, `/dashboard/gov-data`, `/onboarding`, `/profile`)
+- **Dashboard**: KPIs, a "Priority evidence" score, a live Google Maps hotspot
+  view of complaints, a "Linked issues" panel, themes, and a recent-submissions
+  list — each complaint tagged with a **Strong / Moderate / Weak evidence**
+  badge with one-click status/department actions.
+- **"Why this score?"** — clicking any evidence badge opens the stored
+  rule-by-rule breakdown (`verification_reasons`) for that complaint.
+- **Notification bell** — polls `/dashboard/alerts` every minute for new
+  high-confidence (≥ 70) complaints; unseen count survives reloads.
+- **Compare mode** — `/dashboard/compare` puts the last 30 days against the
+  previous 30 (totals, resolutions, per-category deltas — plain subtraction,
+  nothing modeled).
+- **Print report** — a print-CSS view turns the dashboard into an ink-friendly
+  field report straight from the browser; no PDF library.
+- **Verification scoring** (`backend/app/verification.py`): every complaint's
+  confidence badge is computed from independent signals only — photo-AI
+  confidence, GPS presence, corroborating complaints in the same
+  category/constituency, and matching government data. The AI never invents
+  the score; it only explains one computed by fixed rules.
+- **Community consensus** (`backend/app/consensus.py`): GPS-grid-bucketed
+  complaints across *different* categories are checked by Gemini for a
+  plausible shared root cause, surfaced as a hypothesis with a confidence
+  percentage — never stored as fact.
+- **Gov-data upload pipeline** (`backend/app/api/gov_data.py`,
+  `backend/app/parsers.py`): MP uploads an Excel/CSV/PDF, or imports directly
+  from a data.gov.in resource. A 3-step Gemini pipeline (schema detection →
+  data-quality check → plain-language summary) proposes what the data is; a
+  confidence threshold — decided in Python, not by the model — gates
+  auto-commit vs. "needs review."
+- **Admin / MP allowlist** (`backend/app/admin_auth.py`,
+  `backend/app/api/admin.py`, `tools/admin_cli.py`): device-bound HMAC + bcrypt
+  admin auth and an MP allowlist gating who can access the dashboard, managed
+  via a local CLI tool.
+- **User identity & profile** (`backend/app/api/users.py`,
+  `src/app/onboarding`, `src/app/profile`): syncs Firebase identity to a
+  Postgres `users` table with PII fields encrypted at rest
+  (`backend/app/crypto.py`).
+
+### Security hardening
+- `GET /complaints` and `GET /complaints/{id}` used to have **no auth** —
+  anyone could list every citizen's complaints. Now scoped to the requesting
+  MP's own constituency.
+- Complaint media (audio/photos) used to sit behind a **public, permanent**
+  Cloud Storage URL. `storage.rules` now denies public read; the backend mints
+  60-minute signed URLs on demand (`backend/app/media.py`).
+- Firebase App Check wired in (soft-gated behind `ENFORCE_APP_CHECK`, default
+  off until a reCAPTCHA site key is registered).
+
+---
+
+## Architecture (as built)
+
+| Layer | Technology | Notes |
 |---|---|---|
-| Framework | **Next.js 16** (App Router, RSC, Turbopack) | Server-rendered HTML → fast on low-bandwidth phones; one codebase for UI + API. |
-| Hosting | **Cloud Run** (Docker, `output: standalone`) | **Scales to zero** = ₹0 when idle; auto-scales for demo spikes. |
-| Auth | **Firebase Auth** — Phone OTP + Google | Citizens sign in by phone number + SMS OTP (no password, no literacy barrier); MPs use Google. |
-| Database | **Firestore** | Serverless, scales to zero, generous free tier; geo-hotspots via geohash. |
-| Uploads | **Cloud Storage** (signed URLs) | Voice/photo go straight to a private bucket, never bloating the server. |
-| Analytics + ranking | **BigQuery** (+ BigQuery ML) | Joins citizen demand with Census/UDISE/NFHS/CPCB/IMD public data; runs the ranking engine. |
-| Maps | **Google Maps Platform** | Demand hotspot heatmap + travel-distance service gaps. |
-| Speech→Text · SMS/IVR | **Cloud Speech-to-Text (Chirp)** · **Dialogflow** | Multilingual voice intake + low-connectivity SMS/IVR flows. |
-| AI (vision / extract / cluster / rationale) | **Gemini (Flash-Lite) on Vertex AI** + **Translation API** | Organiser-recommended, credits available; **batched + cached** for cost control. |
-
-**Cost principle:** everything scales to zero; AI runs in **batches on new data
-only**, never per-request. **Security:** Firebase ID tokens + Firestore rules +
-server-side validation + signed URLs. **Accessibility:** voice-first, phone-OTP
-login, full i18n (English / Hindi / Tamil / Marathi / Bengali), WCAG-AA contrast,
-large tap targets, minimal client JS, `prefers-reduced-motion` respected.
+| Frontend | **Next.js** (App Router) | Citizen submission flow + MP dashboard, deployed on Cloud Run / Firebase Hosting. |
+| Backend API | **FastAPI**, deployed as a **Firebase Function** (`backend/main.py` wraps the ASGI app via `a2wsgi`) | Also runnable standalone with `uvicorn` for local dev. |
+| Database | **Cloud SQL for Postgres**, via SQLAlchemy + Alembic migrations | Connects via `cloud-sql-python-connector` in production, plain `DATABASE_URL` locally. |
+| Auth | **Firebase Auth** (phone OTP for citizens, Google for MPs) + a device-bound admin auth layer for the allowlist CLI | |
+| File storage | **Firebase / Cloud Storage**, signed URLs only | `storage.rules` denies direct public read. |
+| AI | **Gemini** (`google-genai`), called directly from the backend — audio transcription, photo analysis, gov-data schema detection, consensus reasoning | No Vertex AI batch pipeline; calls are synchronous and best-effort (failures never block a citizen's submission). |
+| Maps | **Google Maps JavaScript API**, loaded via a plain `<script>` tag (`src/components/HotspotMap.tsx`) | No npm SDK dependency. |
+| App integrity | **Firebase App Check** | Optional, env-flag gated. |
 
 ---
 
-## What's in here
+## Repo layout
 
 ```
 src/
   app/
-    layout.tsx            # fonts (Fraunces + Hanken Grotesk + Noto Devanagari) + i18n provider
-    globals.css           # "People's Ledger" design system (design tokens, components, motion)
-    page.tsx              # Landing page
-    sign-in/page.tsx      # Dual-mode auth (citizen phone-OTP / MP Google)
-    submit/page.tsx       # Multi-modal submission: voice · text · photo
-    api/submissions/route.ts  # Accepts a submission; documents the GCP pipeline
-  components/             # Logo, Header, Footer, LanguageSwitcher
-  lib/
-    i18n.tsx              # Typed dictionaries + language context (EN/HI live)
-    firebase.ts           # Guarded client init (runs even without keys)
-Dockerfile                # Multi-stage → tiny Cloud Run image
+    page.tsx                 # Landing page
+    sign-in/page.tsx         # Citizen phone-OTP / MP Google sign-in
+    submit/page.tsx          # Multi-modal submission: voice · text · photo
+    onboarding/page.tsx       # First-time profile setup
+    profile/page.tsx          # Citizen/MP profile
+    dashboard/page.tsx        # MP dashboard: KPIs, map, consensus, verification badges
+    gov-data/page.tsx         # MP gov-data upload + import history
+  components/                 # Header, HotspotMap, Logo, LanguageSwitcher, ...
+  lib/                        # firebase.ts, i18n.tsx, session.tsx, constants.ts, dashboardData.ts
+  services/api.ts             # Frontend → backend API client
+
+backend/
+  app/
+    api/                      # complaints, admin, auth, users, dashboard, gov_data
+    models/                   # SQLAlchemy models (complaint, user, gov_data_import, mp_allowlist, ...)
+    schemas/                  # Pydantic request/response schemas
+    gemini_client.py          # transcribe_audio(), analyze_photo(), gov-data + consensus prompts
+    verification.py           # Complaint evidence scoring
+    consensus.py              # Cross-category linked-issue detection
+    evidence.py                # Gov-data + complaint corroboration scoring
+    parsers.py                 # Excel/CSV/PDF → rows
+    media.py                   # Signed URL minting for private storage
+    admin_auth.py, crypto.py   # Admin auth + field-level encryption
+  alembic/versions/            # Migrations
+  scripts/                     # seed_demo_data.py, import_gov_education.py
+  main.py                      # Firebase Function entrypoint (wraps FastAPI via a2wsgi)
+
+tools/admin_cli.py             # Device-bound local CLI for admin/allowlist operations
+docs/PRD.md, docs/ARCHITECTURE.md   # Original v2 design docs (see stack note above)
+SESSION_CHANGES.md             # Detailed changelog of the most recent working session
 ```
 
 ---
 
 ## Run locally
 
+### Frontend
 ```bash
 npm install
-cp .env.example .env.local     # optional — the UI runs without keys (demo mode)
+cp .env.example .env.local     # on Windows PowerShell: copy .env.example .env.local
 npm run dev                    # http://localhost:3000
 ```
 
-The three pages work with **no configuration**. Sign-in and submit show a
-"demo mode" notice until you add Firebase keys — the flows and UI are fully wired.
-
-> On Windows PowerShell use `copy .env.example .env.local`.
-
----
-
-## Deploy to Google Cloud (Cloud Run)
-
+### Backend
 ```bash
-# one-time
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com \
-  aiplatform.googleapis.com speech.googleapis.com firestore.googleapis.com
-
-# build + deploy straight from source (Cloud Build reads the Dockerfile)
-gcloud run deploy janvaani \
-  --source . \
-  --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1"
+cd backend
+python -m venv venv && venv\Scripts\activate     # Windows; use source venv/bin/activate on macOS/Linux
+pip install -r requirements.txt
+cp .env.example .env           # set DATABASE_URL, GOOGLE_CLOUD_PROJECT, etc.
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
 ```
 
-Cloud Run injects `PORT` (Next.js reads it automatically). Attach a service
-account with `Vertex AI User`, `Cloud Speech Client`, `Storage Object Admin`,
-and `Datastore User` roles so the server can reach the AI + data services via
-Application Default Credentials — **no key files in the container**.
+The backend needs a local Postgres instance (see `backend/docker-compose.yml`
+for a ready-made one) and a `serviceAccountKey.json` (Firebase service account,
+**never commit this file** — it's gitignored) for Firebase Admin SDK access.
 
 ---
 
-## Roadmap (per the PRD)
+## Testing
 
-See [docs/PRD.md](docs/PRD.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full spec and the ranking-engine design.
+Both suites run **without a database and without Google Cloud access** by
+design (see [docs/TESTING.md](docs/TESTING.md)):
 
-- [x] Landing, sign-in, multi-modal submission (this repo)
-- [ ] Speech-to-Text + Gemini extraction pipeline (batched via Pub/Sub)
-- [ ] BigQuery clustering, unique-citizen dedup, hotspot aggregation
-- [ ] Public-dataset seeding into BigQuery (Census / UDISE / NFHS / CPCB / IMD)
-- [ ] Explainable 6-factor ranking engine (demand · gap · population · equity · corroboration · feasibility)
-- [ ] MP dashboard: ranked list + Google Maps heatmap + drill-down + Gemini rationale
+```bash
+# Frontend — vitest + Testing Library (component + i18n contract tests)
+npm test
+
+# Backend — pytest (pure rule modules + endpoint validation via TestClient)
+cd backend
+venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+venv\Scripts\python.exe -m pytest tests -q
+```
+
+Full endpoint reference in [docs/API.md](docs/API.md); user-facing help in
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md) (also served in-app at `/guide`).
+
+---
+
+## Deploy
+
+- **Frontend**: Firebase Hosting / Cloud Run (see `firebase.json`, `next.config.mjs`).
+- **Backend**: deployed as a Firebase Function backed by Cloud SQL — see
+  `backend/main.py` and `backend/Dockerfile` for both entrypoints (Cloud
+  Function and standalone container).
+- **Storage rules**: `storage.rules` must be deployed with
+  `firebase deploy --only storage` any time it changes — it's what keeps
+  complaint media private.
+
+---
+
+## Current gaps (see [SESSION_CHANGES.md](SESSION_CHANGES.md) for full detail)
+
+- No cross-region comparison of government data yet (a district's numbers
+  aren't yet benchmarked against similar districts/state averages).
+- No feedback loop tracking whether an MP acted on a recommendation or whether
+  the underlying problem was resolved.
+- Production env vars (Maps key, App Check key, `ENFORCE_APP_CHECK`) are only
+  set locally, not yet in the deployed Cloud Run/Hosting config.
+- FCM push notifications discussed but not built.
 
 ---
 
